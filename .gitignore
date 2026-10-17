@@ -1,0 +1,8 @@
+# Build output (ship apps through GitHub Releases, not git)
+mac/.build/
+mac/dist/
+windows/build/
+windows/dist/
+
+# macOS
+.DS_Store
