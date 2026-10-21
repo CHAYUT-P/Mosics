@@ -303,6 +303,12 @@ static bool PrepareAudio(const string& id, wstring& path, string& err) {
         size_t e = output.rfind("ERROR:");
         err = e == string::npos ? "Couldn't load this song." : output.substr(e + 7);
         while (!err.empty() && (err.back() == '\n' || err.back() == '\r')) err.pop_back();
+        if (err.rfind("[", 0) == 0 && err.find("]: ") == string::npos) {   // "[youtube] <id>: message"
+            size_t colon = err.find(": ");
+            if (colon != string::npos) err = err.substr(colon + 2);
+        }
+        if (err.find("not a bot") != string::npos)
+            err = "YouTube wants to check this isn't a bot. Try again in a little while.";
         return false;
     }
     DeleteFileW(tmp.c_str());

@@ -144,6 +144,18 @@ Start-Sleep -Seconds 6
 Shot "05-search"
 DoubleClick ([int]($W / 2)) 214
 Start-Sleep -Seconds 30
+Shot "06-play-from-youtube"
+
+# YouTube often asks cloud machines to sign in, so also play a cached test tone through the same path.
+$lib = Get-Content "$env:APPDATA\Mosics\library.json" -Raw | ConvertFrom-Json
+$id = $lib.recent[0].id
+Copy-Item "$PSScriptRoot\tone.aac" "$env:LOCALAPPDATA\Mosics\cache\$id.aac" -Force
+"test tone cached as $id" | Tee-Object -Append "$Out\stats.txt"
+DoubleClick ([int]($W / 2)) 214
+$cx = [int]((328 + $W - 258) / 2)
+Click ($cx + 92) ($H - 88 + 32)    # repeat: all
+Click ($cx + 92) ($H - 88 + 32)    # repeat: one (keeps the tone looping)
+Start-Sleep -Seconds 6
 Shot "06-playing"
 Memory "playing"
 Cpu "playing, Search page" 10

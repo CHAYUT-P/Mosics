@@ -1069,6 +1069,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int show) {
         wchar_t path[32767];
         DWORD n = GetEnvironmentVariableW(L"PATH", path, 32767);
         SetEnvironmentVariableW(L"PATH", (g_binDir + L";" + g_appDir + L";" + wstring(path, n)).c_str());
+        SetEnvironmentVariableW(L"PYTHONIOENCODING", L"utf-8");   // yt-dlp's messages, as UTF-8
+        SetEnvironmentVariableW(L"PYTHONUTF8", L"1");
     }
 
     LoadState();

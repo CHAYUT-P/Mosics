@@ -172,7 +172,8 @@ static float Link(float x, float y, float h, const wstring& label, int act, bool
     return w;
 }
 
-static void Kicker(const wstring& s, float x, float y, float w) {
+static void Kicker(wstring s, float x, float y, float w) {   // small red capitals above a title
+    CharUpperBuffW(s.data(), (DWORD)s.size());
     Text(s, x, y, w, 16, UIF(11.5f, FW_BOLD), pal::accentText, kLine, 1.2f);
 }
 
