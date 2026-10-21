@@ -914,7 +914,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         g.playing = false;
         char buf[96];
         snprintf(buf, sizeof buf, "Playback error (0x%08lX).", (unsigned long)w);
-        g.error = buf;
+        g.error = (HRESULT)w == (HRESULT)0xC00D36FA ? "No speakers or headphones found." : buf;   // MF_E_NO_AUDIO_PLAYBACK_DEVICE
         Redraw();
         return 0;
     }

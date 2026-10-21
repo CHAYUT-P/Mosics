@@ -232,14 +232,17 @@ static void SpinningRecord(float x, float y, float size, const string& art, bool
         Sheen(x, y, size);
     };
     draw();
-    if (spinning) AddSpinJob(x, y, size, size, bg, draw);
+    // Only the label changes as a record turns (grooves and sheen are symmetric): redraw just that square.
+    float lab = size * (size < 80 ? 0.32f : 0.2f) * 2 + 2;
+    if (spinning) AddSpinJob(x + (size - lab) / 2, y + (size - lab) / 2, lab, lab, bg, draw);
 }
 
 static void SpinSleeve(float x, float y, float size, const string& art, bool spinning, float radius, float slide, DWORD bg) {
     auto draw = [=] { SleeveWithRecord(x, y, size, art, spinning, radius, slide); };
     draw();
     float disc = size * 0.96f, ox = x + size * (0.45f + 0.07f * slide), oy = y + size * 0.02f;
-    if (spinning) AddSpinJob(ox, oy, disc, disc, bg, draw);
+    float lab = disc * (disc < 80 ? 0.32f : 0.2f) * 2 + 2;   // see SpinningRecord
+    if (spinning) AddSpinJob(ox + (disc - lab) / 2, oy + (disc - lab) / 2, lab, lab, bg, draw);
 }
 
 // A playlist's sleeve: a retro design, its songs' artwork, or the user's picture.

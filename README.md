@@ -30,6 +30,8 @@ Measured on a Mac while playing music:
 | App size | **2.5 MB** | 393 MB (+ 2.6 GB cache) |
 | Data per hour | ~58 MB (audio only) | ~45–145 MB |
 
+On Windows (measured on a Windows test machine): **~36–40 MB** with the window open and **~2–3 MB** in use (8–10 MB reserved) when closed to the tray, from a **570 KB** app.
+
 ## Install on Windows
 
 Needs Windows 10 (1803 or newer) or Windows 11.
