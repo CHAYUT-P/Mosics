@@ -4,17 +4,19 @@
 
 A tiny, audio-only music player with a vinyl-record look. It searches YouTube Music's catalog and plays only the sound — no video, no ads — while using a fraction of the memory of Spotify.
 
-- **Mac:** Swift + SwiftUI, about 2.5 MB.
-- **Windows:** C++ + plain Win32, about 420 KB. *(This is still the first, older design — see [Windows](#windows).)*
+Mosics for Mac and Mosics for Windows are the **same app at the same version** (see [`VERSION`](VERSION)): same design, same features, same library format.
 
-## What it does (Mac)
+- **Mac:** Swift + SwiftUI, about 2.5 MB.
+- **Windows:** C++ + plain Win32, about 570 KB.
+
+## What it does
 
 - Search songs, or switch to **Videos** for live versions, covers and uploads. More results load as you scroll.
 - **Home:** "Now spinning", mixes made for you (Thai Indie, City Pop, Japan Indie & Anime, If You Like Oasis, plus mixes from what you play) and your recent records.
 - **Playlists** with your own covers: pick a sleeve design, use the songs' artwork, or choose any picture.
 - Liked Songs, Recently Played, a queue, shuffle, repeat, and **autoplay** of similar songs when the queue ends.
-- **Background mode:** close the window and the music keeps playing; control it from the record icon in the menu bar.
-- Media keys and macOS Now Playing work.
+- **Background mode:** close the window and the music keeps playing. Control it from the record icon in the menu bar (Mac) or the system tray (Windows).
+- Media keys work on both.
 
 ## How light is it?
 
@@ -27,6 +29,23 @@ Measured on a Mac while playing music:
 | CPU | **0.3–2%** | ~11% |
 | App size | **2.5 MB** | 393 MB (+ 2.6 GB cache) |
 | Data per hour | ~58 MB (audio only) | ~45–145 MB |
+
+## Install on Windows
+
+Needs Windows 10 (1803 or newer) or Windows 11.
+
+1. Download **`Mosics.exe`** from the [Releases](https://github.com/CHAYUT-P/Mosics/releases) page.
+2. Open it. If Windows SmartScreen says "Windows protected your PC", click **More info → Run anyway** (the app isn't code-signed).
+3. Click **Set up Mosics**. That's it — in one go it:
+   - installs Mosics for your account (no admin needed) with a **Start menu** and **desktop** shortcut,
+   - downloads the two free helpers it plays music through: **yt-dlp** and **Deno** (about 60 MB, once).
+
+You can delete the downloaded `Mosics.exe` afterwards. To update, download the new `Mosics.exe` and open it — setup installs the new version over the old one.
+To remove Mosics: **Settings → Apps → Installed apps → Mosics → Uninstall**.
+
+**Keyboard:** Space play/pause · Ctrl+→ / Ctrl+← next/previous · Ctrl+↑ / Ctrl+↓ volume · Ctrl+S shuffle · Ctrl+R repeat · Ctrl+L like · Ctrl+F search · Esc closes Now Playing.
+
+Your library is saved in `%APPDATA%\Mosics\`. Songs you play are cached in `%LOCALAPPDATA%\Mosics\cache` (kept under 400 MB).
 
 ## Install on a Mac
 
@@ -50,33 +69,34 @@ Needs macOS 14 (Sonoma) or newer.
 
 Your library is saved in `~/Library/Application Support/Mosics/`.
 
-## Windows
+## Moving your library between Mac and PC
 
-> The Windows app is the **first version** (dark design). It hasn't been updated to the vinyl design yet and hasn't been tested on a real PC.
+Both apps keep liked songs, playlists and history in the same `library.json` format. Copy the file across and restart Mosics:
 
-Needs Windows 10 (1703+) or Windows 11.
+- Mac: `~/Library/Application Support/Mosics/library.json`
+- Windows: `%APPDATA%\Mosics\library.json`
 
-1. **Install yt-dlp and deno.** Open **PowerShell** and run:
-   ```powershell
-   winget install yt-dlp.yt-dlp DenoLand.Deno
-   ```
-   Or download `yt-dlp.exe` ([releases](https://github.com/yt-dlp/yt-dlp/releases)) and `deno.exe` ([releases](https://github.com/denoland/deno/releases)) and put them next to `Mosics.exe`.
-2. **Get the app:** download `Mosics.exe` from [Releases](https://github.com/CHAYUT-P/Mosics/releases) into its own folder (for example `C:\Apps\Mosics\`), or build it from macOS/Linux with `brew install mingw-w64` and `cd windows && ./build.sh`.
-3. **Run `Mosics.exe`.** If Windows SmartScreen says "Windows protected your PC", click **More info → Run anyway**.
-
-Your library is saved in `%APPDATA%\Mosics\`, and downloaded songs are cached in `%LOCALAPPDATA%\Mosics\cache` (kept under 400 MB).
+(Playlist covers you chose from your own pictures live in the `covers` folder next to it — copy that too.)
 
 ## How it works
 
 - **Search, mixes and radio** come straight from YouTube Music's public web API — no account or key.
-- **Audio** comes through [yt-dlp](https://github.com/yt-dlp/yt-dlp), which gets past YouTube's anti-bot checks. Only the audio stream is fetched. If songs ever stop playing, update yt-dlp (`brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`).
+- **Audio** comes through [yt-dlp](https://github.com/yt-dlp/yt-dlp), which gets past YouTube's anti-bot checks. Only the audio stream is fetched. On Windows, Mosics keeps its own copy of yt-dlp up to date; on a Mac, run `brew upgrade yt-dlp` if songs ever stop playing.
 - Records, grooves and sleeves are drawn by code, so they add nothing to the app's size.
 
-## Project layout
+## Building and releasing
 
 ```
+VERSION     the version of both apps (one number for Mac and Windows)
 mac/        SwiftUI app — build.sh packages dist/Mosics.app
-windows/    Win32 app — build.sh cross-compiles dist/Mosics.exe
+windows/    Win32 app — build.sh cross-compiles dist/Mosics.exe (brew install mingw-w64)
+```
+
+Every push builds both apps on GitHub Actions and runs the Windows app on a real Windows machine (screenshots are saved with the run). To publish a release, bump `VERSION`, commit, and push a matching tag:
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ## Note

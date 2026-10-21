@@ -18,6 +18,24 @@ public static class U {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int hh, uint f);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    public delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+    public static string Describe(uint pid) {
+        var sb = new System.Text.StringBuilder();
+        EnumWindows((h, l) => {
+            uint p; GetWindowThreadProcessId(h, out p);
+            if (p == pid) {
+                var c = new System.Text.StringBuilder(256); var t = new System.Text.StringBuilder(512);
+                GetClassName(h, c, 256); GetWindowText(h, t, 512);
+                sb.AppendLine("  window class=" + c + " title=" + t + " visible=" + IsWindowVisible(h));
+            }
+            return true;
+        }, IntPtr.Zero);
+        return sb.ToString();
+    }
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
@@ -79,7 +97,12 @@ New-Item -ItemType Directory -Force -Path $dl | Out-Null
 Copy-Item $Exe "$dl\Mosics.exe" -Force
 $script:proc = Start-Process "$dl\Mosics.exe" -PassThru
 for ($i = 0; $i -lt 40 -and -not $script:win; $i++) { Start-Sleep -Milliseconds 250; $w = [U]::FindWindow("MosicsMain", $null); if ($w -ne [IntPtr]::Zero) { $script:win = $w } }
-if (-not $script:win) { throw "Mosics window didn't appear" }
+if (-not $script:win) {
+    Start-Sleep -Seconds 2
+    if ($script:proc.HasExited) { Write-Host "Mosics exited with code $($script:proc.ExitCode)" }
+    else { Write-Host "Mosics is running but has no main window:"; Write-Host ([U]::Describe([uint32]$script:proc.Id)) }
+    throw "Mosics window didn't appear"
+}
 [U]::SetWindowPos($script:win, [IntPtr]::Zero, 0, 0, 1180, 780, 0x0014) | Out-Null
 Start-Sleep -Seconds 4
 $r = New-Object U+RECT; [U]::GetClientRect($script:win, [ref]$r) | Out-Null

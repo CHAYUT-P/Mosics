@@ -47,6 +47,10 @@ jobs:
         with:
           name: Mosics-windows
           path: build
+      - name: Enable Media Foundation (missing on Windows Server)
+        shell: pwsh
+        continue-on-error: true
+        run: Install-WindowsFeature Server-Media-Foundation | Format-List
       - name: Run Mosics on Windows
         shell: pwsh
         run: ./windows/tests/smoke.ps1 -Exe build/Mosics.exe -Out screenshots

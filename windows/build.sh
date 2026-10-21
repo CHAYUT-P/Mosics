@@ -14,7 +14,7 @@ $CXX -std=c++17 -Os -s -static -municode -mwindows -DUNICODE -D_UNICODE -D_WIN32
     -ffunction-sections -fdata-sections -Wl,--gc-sections \
     -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type -Wno-missing-field-initializers \
     src/main.cpp build/app.res -o dist/Mosics.exe \
-    -lcomctl32 -lcomdlg32 -lwinhttp -lmfplay -lmfplat -lmfuuid -lgdiplus -ldwmapi -lshlwapi \
-    -lshell32 -lole32 -loleaut32 -luuid -lpropsys
+    -lcomctl32 -lcomdlg32 -lwinhttp -lmfuuid -lgdiplus -ldwmapi -lshlwapi \
+    -lshell32 -lole32 -loleaut32 -luuid -lpropsys -lversion
 
 echo "Built dist/Mosics.exe $VERSION ($(du -h dist/Mosics.exe | cut -f1))"

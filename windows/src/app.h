@@ -369,6 +369,22 @@ public:
     }
 } g_callback;
 
+// Media Foundation is loaded on demand: Windows "N" editions and Windows Server don't have it, and a
+// direct import would stop Mosics from starting at all there. Without it, everything but playback works.
+static HRESULT(WINAPI* pMFShutdown)() = nullptr;
+
+static bool InitMediaFoundation() {
+    HMODULE plat = LoadLibraryExW(L"mfplat.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    HMODULE play = LoadLibraryExW(L"mfplay.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!plat || !play) return false;
+    auto start = (HRESULT(WINAPI*)(ULONG, DWORD))(void*)GetProcAddress(plat, "MFStartup");
+    pMFShutdown = (HRESULT(WINAPI*)())(void*)GetProcAddress(plat, "MFShutdown");
+    auto create = (HRESULT(WINAPI*)(LPCWSTR, BOOL, MFP_CREATION_OPTIONS, IMFPMediaPlayerCallback*, HWND, IMFPMediaPlayer**))(
+        void*)GetProcAddress(play, "MFPCreateMediaPlayer");
+    if (!start || !create || FAILED(start(MF_VERSION, MFSTARTUP_LITE))) return false;
+    return SUCCEEDED(create(nullptr, FALSE, 0, &g_callback, nullptr, &g_mp));
+}
+
 struct PrepResult { int seq; string id; wstring path; string err; };
 struct RadioResult { string seed; vector<Track> tracks; bool thenPlay; };
 
@@ -424,6 +440,13 @@ static void OnAudioReady(PrepResult* r) {
         } else {
             g.error = r->err;
         }
+        Redraw();
+        return;
+    }
+    if (!g_mp) {
+        g.loading = false;
+        g.playing = false;
+        g.error = "Windows Media Foundation is missing. On Windows N, install the Media Feature Pack.";
         Redraw();
         return;
     }
@@ -543,6 +566,7 @@ static void SetVolume(float v) {
 }
 
 static void OnTrackEnded() {
+    if (!g_mp) return;
     if (g.repeat == Repeat::One) { SeekTo(0); g_mp->Play(); return; }
     if (g.qi + 1 < (int)g.queue.size() || g.repeat == Repeat::All || g.autoplay) {
         Next();

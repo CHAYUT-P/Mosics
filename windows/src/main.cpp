@@ -566,7 +566,7 @@ static void Activate(int act, int arg) {
         break;
     case aSetupLater:
         g_setup.visible = false;
-        if (HelpersReady() && !IsInstalledCopy()) { g.declinedInstall = U8(SelfPath()); SaveSettings(); }
+        if (HelpersReady() && !IsInstalledCopy()) { g.declinedInstall = DeclineKey(); SaveSettings(); }
         break;
     default: break;
     }
@@ -1024,15 +1024,28 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int show) {
 
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\MosicsSingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (HWND other = FindWindowW(L"MosicsMain", nullptr)) {
-            AllowSetForegroundWindow(ASFW_ANY);
-            PostMessageW(other, WM_APP_SHOW, 0, 0);
+        HWND other = FindWindowW(L"MosicsMain", nullptr);
+        // A newer Mosics.exe was downloaded while the installed one plays in the tray:
+        // close the old one so setup can install this version over it.
+        bool upgrade = other && !IsInstalledCopy() && FileExists(InstalledExe()) && FileVersion(InstalledExe()) != MOSICS_VERSION;
+        if (!upgrade) {
+            if (other) {
+                AllowSetForegroundWindow(ASFW_ANY);
+                PostMessageW(other, WM_APP_SHOW, 0, 0);
+            }
+            return 0;
         }
-        return 0;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(other, &pid);
+        HANDLE old = OpenProcess(SYNCHRONIZE, FALSE, pid);
+        DWORD_PTR r;
+        SendMessageTimeoutW(other, WM_APP_QUIT, 0, 0, SMTO_ABORTIFHUNG, 5000, &r);
+        if (old) { WaitForSingleObject(old, 8000); CloseHandle(old); }
+        CloseHandle(single);
+        single = CreateMutexW(nullptr, TRUE, L"Local\\MosicsSingleInstance");
     }
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    MFStartup(MF_VERSION, MFSTARTUP_LITE);
     Gdiplus::GdiplusStartupInput gsi;
     Gdiplus::GdiplusStartup(&g_gdiplusToken, &gsi, nullptr);
     INITCOMMONCONTROLSEX icc{sizeof icc, ICC_STANDARD_CLASSES};
@@ -1061,11 +1074,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int show) {
         else delete bmp;
     };
 
-    if (FAILED(MFPCreateMediaPlayer(nullptr, FALSE, 0, &g_callback, nullptr, &g_mp))) {
-        MessageBoxW(nullptr, L"Media Foundation is not available on this PC.\n"
-                             L"On Windows N editions, install the Media Feature Pack.", L"Mosics", MB_ICONERROR);
-        return 1;
-    }
+    InitMediaFoundation();
 
     g_brCard = CreateSolidBrush(CR(pal::card));
     g_brPaper = CreateSolidBrush(CR(pal::paper));
@@ -1118,7 +1127,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int show) {
     PurgeArt();
     FreeBuffer();
     Gdiplus::GdiplusShutdown(g_gdiplusToken);
-    MFShutdown();
+    if (pMFShutdown) pMFShutdown();
     CoUninitialize();
     if (single) CloseHandle(single);
     return 0;

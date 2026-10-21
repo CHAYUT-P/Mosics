@@ -30,10 +30,25 @@ static const wchar_t kUninstallKey[] = L"Software\\Microsoft\\Windows\\CurrentVe
 
 static bool IsInstalledCopy() { return lstrcmpiW(g_appDir.c_str(), InstallDir().c_str()) == 0; }
 
+// "Not now" is remembered per file and version, so a newer download still offers to install.
+static string DeclineKey() { return U8(SelfPath()) + "|" + MOSICS_VERSION; }
+
+static string FileVersion(const wstring& exe) {
+    DWORD dummy = 0, size = GetFileVersionInfoSizeW(exe.c_str(), &dummy);
+    if (!size) return "";
+    vector<BYTE> buf(size);
+    wchar_t* text = nullptr;
+    UINT len = 0;
+    if (!GetFileVersionInfoW(exe.c_str(), 0, size, buf.data()) ||
+        !VerQueryValueW(buf.data(), L"\\StringFileInfo\\040904B0\\ProductVersion", (void**)&text, &len) || !text)
+        return "";
+    return U8(text);
+}
+
 // Shown on first launch, after a download of a new version, or when a helper is missing.
 static bool SetupNeeded() {
     return !HelpersReady() || (!IsInstalledCopy() && !FileExists(g_appDir + L"\\portable.txt") &&
-                               g.declinedInstall != U8(SelfPath()));
+                               g.declinedInstall != DeclineKey());
 }
 
 static bool MakeShortcut(const wstring& link, const wstring& target) {
