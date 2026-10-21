@@ -96,7 +96,7 @@ $dl = Join-Path $env:TEMP "Downloads"
 New-Item -ItemType Directory -Force -Path $dl | Out-Null
 Copy-Item $Exe "$dl\Mosics.exe" -Force
 $script:proc = Start-Process "$dl\Mosics.exe" -PassThru
-for ($i = 0; $i -lt 40 -and -not $script:win; $i++) { Start-Sleep -Milliseconds 250; $w = [U]::FindWindow("MosicsMain", $null); if ($w -ne [IntPtr]::Zero) { $script:win = $w } }
+for ($i = 0; $i -lt 40 -and -not $script:win; $i++) { Start-Sleep -Milliseconds 250; $w = [U]::FindWindow("MosicsMain", [NullString]::Value); if ($w -ne [IntPtr]::Zero) { $script:win = $w } }
 if (-not $script:win) {
     Start-Sleep -Seconds 2
     if ($script:proc.HasExited) { Write-Host "Mosics exited with code $($script:proc.ExitCode)" }
@@ -136,7 +136,7 @@ Memory "home"
 
 # Search and play.
 Click 100 134                      # sidebar: Search
-$edit = [U]::FindWindowEx($script:win, [IntPtr]::Zero, "Edit", $null)
+$edit = [U]::FindWindowEx($script:win, [IntPtr]::Zero, "Edit", [NullString]::Value)
 [U]::SendMessage($edit, 0x000C, [IntPtr]0, "Oasis Wonderwall") | Out-Null   # WM_SETTEXT
 Start-Sleep -Seconds 6
 Shot "05-search"
@@ -168,7 +168,7 @@ Shot "11-recent"
 # New playlist (accept the suggested name in the rename prompt).
 Click 116 ($H - 88 - 16 - 21)
 Start-Sleep -Seconds 1
-$prompt = [U]::FindWindow("MosicsPrompt", $null)
+$prompt = [U]::FindWindow("MosicsPrompt", [NullString]::Value)
 if ($prompt -ne [IntPtr]::Zero) { [U]::PostMessage($prompt, 0x0111, [IntPtr]1, [IntPtr]0) | Out-Null }   # WM_COMMAND IDOK
 Start-Sleep -Seconds 2
 Shot "12-playlist"
