@@ -1,10 +1,11 @@
 #include <winver.h>
+// MOSICS_VERSION ("1.1.0") and MOSICS_VERSION_NUM (1,1,0,0) come from ../VERSION via build.sh.
 1 ICON "mosics.ico"
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION MOSICS_VERSION_NUM
+PRODUCTVERSION MOSICS_VERSION_NUM
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -14,8 +15,9 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "Mosics"
       VALUE "ProductName", "Mosics"
-      VALUE "FileVersion", "1.0"
-      VALUE "ProductVersion", "1.0"
+      VALUE "FileVersion", MOSICS_VERSION
+      VALUE "ProductVersion", MOSICS_VERSION
+      VALUE "OriginalFilename", "Mosics.exe"
     END
   END
   BLOCK "VarFileInfo"

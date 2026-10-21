@@ -1,0 +1,85 @@
+# Builds both apps from the same VERSION file, smoke-tests the Windows app on a real Windows machine,
+# and publishes a GitHub Release when a version tag (v1.2.3) is pushed.
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+      - name: Build Mosics.exe
+        run: ./windows/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mosics-windows
+          path: windows/dist/Mosics.exe
+
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Mosics.app
+        run: ./mac/build.sh
+      - name: Zip
+        run: cd mac/dist && ditto -c -k --keepParent Mosics.app Mosics-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mosics-mac
+          path: mac/dist/Mosics-mac.zip
+
+  windows-smoke:
+    needs: windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Mosics-windows
+          path: build
+      - name: Run Mosics on Windows
+        shell: pwsh
+        run: ./windows/tests/smoke.ps1 -Exe build/Mosics.exe -Out screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-screenshots
+          path: screenshots
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(cat VERSION)
+          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME doesn't match VERSION $VERSION"; exit 1; }
+          cat > notes.md <<EOF
+          **Windows:** download **Mosics.exe** and open it. The first launch sets everything up in one click
+          (installs Mosics for your account and downloads yt-dlp + Deno). If SmartScreen appears, choose **More info → Run anyway**.
+
+          **Mac:** download **Mosics-mac.zip**, unzip, drag **Mosics** to Applications, and \`brew install yt-dlp\`.
+          First launch: System Settings → Privacy & Security → **Open Anyway**.
+
+          Both apps are version $VERSION.
+          EOF
+          gh release create "$GITHUB_REF_NAME" assets/Mosics.exe assets/Mosics-mac.zip \
+            --title "Mosics $VERSION" --notes-file notes.md

@@ -11,6 +11,7 @@ else
   BIN=$(swift build -c release --show-bin-path)/Mosics
 fi
 
+VERSION=$(tr -d ' \n' < ../VERSION)   # shared with the Windows app
 APP=dist/Mosics.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -24,7 +25,7 @@ if [[ ! -f .build/AppIcon.icns || scripts/make-icon.swift -nt .build/AppIcon.icn
 fi
 cp .build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -35,8 +36,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>Mosics</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -46,7 +47,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 codesign --force --sign - "$APP" >/dev/null
-echo "Built $APP ($(du -sh "$APP" | cut -f1))"
+echo "Built $APP $VERSION ($(du -sh "$APP" | cut -f1))"
 
 if [[ "${1:-}" == "--install" ]]; then
   rm -rf /Applications/Mosics.app
