@@ -71,21 +71,18 @@ static void BeginRender(const RECT& rc) {
     R.dc = g_mem;
     R.paint = rc;
     R.clips.clear();
-    R.states.clear();
-    SaveDC(g_mem);
-    IntersectClipRect(g_mem, rc.left, rc.top, rc.right, rc.bottom);
     R.g = new Gdiplus::Graphics(g_mem);
     R.g->SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     R.g->SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
     R.g->SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
-    R.g->SetClip(Gdiplus::Rect(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top));
+    ApplyClip();
 }
 
 static void EndRender() {
     R.g->Flush(Gdiplus::FlushIntentionSync);
     delete R.g;
     R.g = nullptr;
-    RestoreDC(g_mem, -1);
+    SelectClipRgn(g_mem, nullptr);
     R.dc = nullptr;
 }
 
@@ -778,6 +775,16 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         UpdateSpinTimer();
         PostMessageW(h, WM_APP_LAYOUT, 0, 0);
+        return 0;
+    }
+    case WM_PRINTCLIENT: {   // an exact picture for PrintWindow (taskbar previews, screenshots)
+        RECT rc;
+        GetClientRect(h, &rc);
+        EnsureBuffer((HDC)w, rc.right, rc.bottom);
+        BeginRender(rc);
+        PaintAll();
+        EndRender();
+        BitBlt((HDC)w, 0, 0, rc.right, rc.bottom, g_mem, 0, 0, SRCCOPY);
         return 0;
     }
     case WM_APP_LAYOUT: LayoutChildren(); return 0;

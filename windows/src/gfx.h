@@ -71,7 +71,6 @@ struct Gfx {
     Gdiplus::Graphics* g = nullptr;
     RECT paint{};               // dirty area, pixels
     vector<ClipRect> clips;     // DIPs
-    vector<Gdiplus::GraphicsState> states;
 } R;
 
 // Skip anything outside the dirty area or the current clip — most frames repaint one small record.
@@ -85,6 +84,25 @@ static bool Visible(float x, float y, float w, float h) {
     return true;
 }
 
+// Applies the innermost clip (or just the dirty area) to both GDI and GDI+. Set explicitly each time:
+// mixing SaveDC/RestoreDC with GDI+ Save/Restore on one DC leaves the wrong clip behind.
+static void ApplyClip() {
+    RECT r = R.paint;
+    if (!R.clips.empty()) {
+        const ClipRect& c = R.clips.back();
+        r.left = std::max(r.left, (LONG)IPX(c.x));
+        r.top = std::max(r.top, (LONG)IPX(c.y));
+        r.right = std::min(r.right, (LONG)IPX(c.x + c.w));
+        r.bottom = std::min(r.bottom, (LONG)IPX(c.y + c.h));
+        if (r.right < r.left) r.right = r.left;
+        if (r.bottom < r.top) r.bottom = r.top;
+    }
+    HRGN rgn = CreateRectRgn(r.left, r.top, r.right, r.bottom);
+    SelectClipRgn(R.dc, rgn);
+    DeleteObject(rgn);
+    R.g->SetClip(Gdiplus::Rect(r.left, r.top, r.right - r.left, r.bottom - r.top));
+}
+
 static void PushClip(float x, float y, float w, float h) {
     if (!R.clips.empty()) {   // intersect with the enclosing clip
         const ClipRect& c = R.clips.back();
@@ -92,17 +110,12 @@ static void PushClip(float x, float y, float w, float h) {
         x = l; y = t; w = std::max(0.0f, r - l); h = std::max(0.0f, b - t);
     }
     R.clips.push_back({x, y, w, h});
-    SaveDC(R.dc);
-    IntersectClipRect(R.dc, IPX(x), IPX(y), IPX(x + w), IPX(y + h));
-    R.states.push_back(R.g->Save());
-    R.g->IntersectClip(Gdiplus::RectF(PX(x), PX(y), PX(w), PX(h)));
+    ApplyClip();
 }
 
 static void PopClip() {
     R.clips.pop_back();
-    RestoreDC(R.dc, -1);
-    R.g->Restore(R.states.back());
-    R.states.pop_back();
+    ApplyClip();
 }
 
 // ───────────────────────────── Bitmap caches ─────────────────────────────

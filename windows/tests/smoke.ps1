@@ -46,7 +46,7 @@ function Shot($name) {
     $bmp = New-Object System.Drawing.Bitmap ($r.Right), ($r.Bottom)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $dc = $g.GetHdc()
-    [U]::PrintWindow($script:win, $dc, 3) | Out-Null   # PW_CLIENTONLY | PW_RENDERFULLCONTENT
+    [U]::PrintWindow($script:win, $dc, 1) | Out-Null   # PW_CLIENTONLY: Mosics draws itself via WM_PRINTCLIENT
     $g.ReleaseHdc($dc)
     $g.Dispose()
     $bmp.Save("$Out\$name.png")
@@ -66,11 +66,14 @@ function DoubleClick($x, $y) {
     [U]::PostMessage($script:win, 0x0203, [IntPtr]1, (Lp $x $y)) | Out-Null   # WM_LBUTTONDBLCLK
     [U]::PostMessage($script:win, 0x0202, [IntPtr]0, (Lp $x $y)) | Out-Null
 }
-# The primary (red) button of a sheet: scan up from the bottom along x for Swiss Red.
-function FindRed($x) {
+# The primary (red) button of a sheet: move the mouse away (no hover colour), then scan up from the bottom along x.
+function FindRed($x, $name) {
+    [U]::PostMessage($script:win, 0x0200, [IntPtr]0, (Lp 2 2)) | Out-Null
+    Start-Sleep -Milliseconds 500
+    Shot $name
     for ($y = $script:last.Height - 1; $y -gt 0; $y--) {
         $c = $script:last.GetPixel($x, $y)
-        if ([Math]::Abs($c.R - 215) -lt 12 -and [Math]::Abs($c.G - 38) -lt 12 -and [Math]::Abs($c.B - 30) -lt 12) { return $y - 14 }
+        if ([Math]::Abs($c.R - 215) -lt 14 -and [Math]::Abs($c.G - 38) -lt 14 -and [Math]::Abs($c.B - 30) -lt 14) { return $y - 14 }
     }
     return -1
 }
@@ -108,12 +111,11 @@ Start-Sleep -Seconds 4
 $r = New-Object U+RECT; [U]::GetClientRect($script:win, [ref]$r) | Out-Null
 $W = $r.Right; $H = $r.Bottom
 Write-Host "client $W x $H"
-Shot "01-setup"
 Memory "launch (setup sheet)"
 
 # Set up: install + download yt-dlp and Deno.
 $bx = [int](($W + 580) / 2 - 28 - 30)
-$by = FindRed $bx
+$by = FindRed $bx "01-setup"
 if ($by -lt 0) { throw "Set up button not found" }
 Click $bx $by
 $bin = Join-Path $env:LOCALAPPDATA "Mosics\bin"
@@ -123,13 +125,13 @@ for ($i = 0; $i -lt 120; $i++) {
     Start-Sleep -Seconds 2
 }
 Start-Sleep -Seconds 3
-Shot "03-setup-done"
 "installed exe:   $(Test-Path "$env:LOCALAPPDATA\Programs\Mosics\Mosics.exe")" | Tee-Object -Append "$Out\stats.txt"
 "start menu link: $(Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Mosics.lnk")" | Tee-Object -Append "$Out\stats.txt"
 "yt-dlp:          $(Test-Path "$bin\yt-dlp.exe")   deno: $(Test-Path "$bin\deno.exe")" | Tee-Object -Append "$Out\stats.txt"
 & "$bin\yt-dlp.exe" --version | Tee-Object -Append "$Out\stats.txt"
-$by = FindRed $bx
-if ($by -gt 0) { Click $bx $by }   # Start listening
+$by = FindRed $bx "03-setup-done"
+if ($by -lt 0) { throw "Start listening button not found" }
+Click $bx $by                      # Start listening
 Start-Sleep -Seconds 25            # Home mixes load
 Shot "04-home"
 Memory "home"
