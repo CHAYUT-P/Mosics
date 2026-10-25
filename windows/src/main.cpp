@@ -964,9 +964,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         break;
     case WM_COMMAND:
         if (LOWORD(w) == IDC_SEARCH && HIWORD(w) == EN_CHANGE && !g_ignoreEdit) {
-            int n = GetWindowTextLengthW(g_search);
+            HWND edit = (HWND)l;   // not g_search: this also arrives while the box is being created
+            int n = GetWindowTextLengthW(edit);
             wstring text(n, 0);
-            GetWindowTextW(g_search, text.data(), n + 1);
+            GetWindowTextW(edit, text.data(), n + 1);
             g.query = U8(text);
             SetTimer(h, TIMER_SEARCH, 350, nullptr);
             Redraw();
