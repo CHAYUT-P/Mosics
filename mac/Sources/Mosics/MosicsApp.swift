@@ -29,6 +29,12 @@ struct MosicsApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 780)
         .commands {
+            CommandGroup(after: .sidebar) {
+                Picker("Appearance", selection: Binding(get: { ThemeStore.shared.appearance },
+                                                        set: { ThemeStore.shared.appearance = $0 })) {
+                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+                }
+            }
             CommandMenu("Playback") {
                 Button(player.isPlaying ? "Pause" : "Play") { player.togglePlay() }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -60,6 +66,10 @@ struct MosicsApp: App {
 
 /// Keeps the app (and the music) alive when the window is closed; the Dock icon brings it back.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { ThemeStore.shared.start() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 

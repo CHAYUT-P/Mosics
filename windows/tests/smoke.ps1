@@ -179,6 +179,14 @@ Click 100 216                      # Recently Played
 Start-Sleep -Seconds 3
 Shot "11-recent"
 
+# Artist page: click the artist under the first search result.
+Click 100 134                      # Search (results are still there)
+Start-Sleep -Seconds 2
+Click 410 224                      # "Oasis" under the first song
+Start-Sleep -Seconds 12
+Shot "13-artist"
+Memory "artist page"
+
 # New playlist (accept the suggested name in the rename prompt).
 Click 116 ($H - 88 - 16 - 21)
 Start-Sleep -Seconds 1
@@ -194,5 +202,26 @@ Start-Sleep -Seconds 6
 Memory "closed to tray"
 Cpu "closed to tray" 10
 
+Stop-Process -Id $script:proc.Id
+Start-Sleep -Seconds 2
+
+# Dark mode: set it in settings and start the installed copy (as from the Start menu).
+$settings = "$env:APPDATA\Mosics\settings.json"
+$json = Get-Content $settings -Raw | ConvertFrom-Json
+$json | Add-Member -NotePropertyName appearance -NotePropertyValue 2 -Force
+$json | ConvertTo-Json -Compress | Set-Content $settings -Encoding utf8
+$script:win = $null
+$script:proc = Start-Process "$env:LOCALAPPDATA\Programs\Mosics\Mosics.exe" -PassThru
+for ($i = 0; $i -lt 40 -and -not $script:win; $i++) { Start-Sleep -Milliseconds 250; $w = [U]::FindWindow("MosicsMain", [NullString]::Value); if ($w -ne [IntPtr]::Zero) { $script:win = $w } }
+if (-not $script:win) { throw "Installed Mosics didn't start" }
+[U]::SetWindowPos($script:win, [IntPtr]::Zero, 0, 0, 1180, 780, 0x0014) | Out-Null
+Start-Sleep -Seconds 6
+Shot "14-dark-home"
+Click 100 134
+Start-Sleep -Seconds 8
+Shot "15-dark-search"
+Click 410 224
+Start-Sleep -Seconds 12
+Shot "16-dark-artist"
 Stop-Process -Id $script:proc.Id
 Write-Host "done"

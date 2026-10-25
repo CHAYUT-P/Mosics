@@ -31,6 +31,7 @@ enum : UINT {
     WM_APP_SHOW,                  // another launch asked us to come forward
     WM_APP_QUIT,                  // the uninstaller asks us to exit
     WM_APP_LAYOUT,                // reposition child controls after a paint
+    WM_APP_ARTIST,                // lParam: ArtistResult*
 };
 
 struct Playlist {
@@ -42,7 +43,7 @@ struct Playlist {
     string image;   // file name in the covers folder
 };
 
-enum class Page { Home, Search, Liked, Recent, Queue, Playlist, Mix };
+enum class Page { Home, Search, Liked, Recent, Queue, Playlist, Mix, Artist };
 enum class Repeat { Off, All, One };
 
 struct App {
@@ -56,6 +57,7 @@ struct App {
     double ytdlpCheckedAt = 0;
     int searchKind = 0;   // 0 songs, 1 videos
     string declinedInstall;   // exe path the user chose to keep running without installing
+    int appearance = 0;       // 0 match Windows, 1 light, 2 dark
 
     // Player
     vector<Track> queue;
@@ -78,6 +80,10 @@ struct App {
     bool searching = false, loadingMore = false;
     string searchError;
     int searchSeq = 0;
+
+    // Artist page (pageId is the key into `artists`)
+    std::map<string, ytmusic::ArtistInfo> artists;
+    std::map<string, bool> artistLoading, artistFailed;
 
     // Home
     vector<Shelf> shelves;
@@ -143,7 +149,8 @@ static void SaveSettings() {
                  .set("lastQuery", g.query)
                  .set("searchKind", g.searchKind)
                  .set("trayHintShown", g.trayHintShown)
-                 .set("declinedInstall", g.declinedInstall);
+                 .set("declinedInstall", g.declinedInstall)
+                 .set("appearance", g.appearance);
     WriteFileAll(g_dataDir + L"\\settings.json", j.dump());
 }
 
@@ -175,6 +182,7 @@ static void LoadState() {
     g.searchKind = std::clamp((int)set["searchKind"].num(0), 0, 1);
     g.trayHintShown = set["trayHintShown"].boolean(false);
     g.declinedInstall = set["declinedInstall"].str();
+    g.appearance = std::clamp((int)set["appearance"].num(0), 0, 2);
     if (migrated || !lib["volume"].isNull()) { SaveLibrary(); SaveSettings(); }
 }
 
@@ -808,6 +816,50 @@ static void OnShelves(vector<Shelf>* s) {
         g.shelvesAt = NowSeconds();
         SaveShelves();
     }
+    Redraw();
+}
+
+// ───────────────────────────── Artists ─────────────────────────────
+
+struct ArtistResult { string key; ytmusic::ArtistInfo info; bool ok; };
+
+static string ArtistKey(const ytmusic::ArtistRef& r) { return r.name + "\x1F" + r.browseId; }
+
+// Finds the artist's channel (if we only know the name), then their page and full song list.
+static void LoadArtist(const ytmusic::ArtistRef& ref) {
+    string key = ArtistKey(ref);
+    if (g.artists.count(key) || g.artistLoading[key]) return;
+    g.artistLoading[key] = true;
+    g.artistFailed[key] = false;
+    RunAsync([key, ref] {
+        auto* r = new ArtistResult{key, {}, false};
+        r->info.ref = ref;
+        string body;
+        if (ref.browseId.empty()) {
+            if (YTMusicPost("search", ytmusic::artistSearchBody(ref.name), body)) {
+                auto found = ytmusic::parseArtistSearch(body);
+                const std::pair<ytmusic::ArtistRef, string>* pick = nullptr;
+                for (auto& f : found) if (!pick && ArtistMatches(f.first.name, ref.name)) pick = &f;
+                if (!pick && !found.empty()) pick = &found[0];
+                if (pick) { r->info.ref = pick->first; r->info.audience = pick->second; }
+            }
+        }
+        if (!r->info.ref.browseId.empty() && YTMusicPost("browse", ytmusic::browseBody(r->info.ref.browseId), body)) {
+            r->ok = true;
+            ytmusic::parseArtistBrowse(body, r->info);
+            if (!r->info.allSongs.empty() && YTMusicPost("browse", ytmusic::browseBody(r->info.allSongs), body)) {
+                auto all = ytmusic::parsePlaylistSongs(body);
+                if (all.size() > r->info.tracks.size()) r->info.tracks = std::move(all);
+            }
+        }
+        PostMessageW(g_hwnd, WM_APP_ARTIST, 0, (LPARAM)r);
+    });
+}
+
+static void OnArtist(ArtistResult* r) {
+    g.artistLoading[r->key] = false;
+    if (r->ok) g.artists[r->key] = std::move(r->info);
+    else g.artistFailed[r->key] = true;
     Redraw();
 }
 

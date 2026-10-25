@@ -146,6 +146,111 @@ inline Page parseMore(const std::string& body) {
     return shelf.isNull() ? Page{} : parseShelf(shelf);
 }
 
+// ───── Artists ─────
+
+struct ArtistRef { std::string name, browseId, photo; };
+
+struct ArtistInfo {
+    ArtistRef ref;
+    std::string audience;            // "33.2M monthly audience"
+    std::vector<Track> tracks;       // most played first (up to 100)
+    std::vector<ArtistRef> related;  // "Fans might also like"
+    std::string allSongs;            // browse id of the "See all" songs playlist
+};
+
+inline std::string artistSearchBody(const std::string& name) {
+    return Json::object().set("context", context()).set("query", name).set("params", "EgWKAQIgAWoKEAkQBRAKEAMQBA%3D%3D").dump();
+}
+inline std::string browseBody(const std::string& id) { return Json::object().set("context", context()).set("browseId", id).dump(); }
+
+// "Artists" search results, with their audience line ("Artist • 33.2M monthly audience" → the last part).
+inline std::vector<std::pair<ArtistRef, std::string>> parseArtistSearch(const std::string& body) {
+    std::vector<std::pair<ArtistRef, std::string>> out;
+    Json j = Json::parse(body);
+    const Json& sections = j["contents"]["tabbedSearchResultsRenderer"]["tabs"][0]["tabRenderer"]["content"]
+                            ["sectionListRenderer"]["contents"];
+    for (auto& section : sections.items())
+        for (auto& item : section["musicShelfRenderer"]["contents"].items()) {
+            const Json& r = item["musicResponsiveListItemRenderer"];
+            const std::string& id = r["navigationEndpoint"]["browseEndpoint"]["browseId"].str();
+            if (id.empty()) continue;
+            const Json& thumbs = r["thumbnail"]["musicThumbnailRenderer"]["thumbnail"]["thumbnails"];
+            std::string sub = runsText(r["flexColumns"][1]["musicResponsiveListItemFlexColumnRenderer"]["text"]["runs"]);
+            size_t dot = sub.rfind(" \xE2\x80\xA2 ");
+            out.push_back({{runsText(r["flexColumns"][0]["musicResponsiveListItemFlexColumnRenderer"]["text"]["runs"]), id,
+                            thumbs[int(thumbs.size()) - 1]["url"].str()},
+                           dot == std::string::npos ? sub : sub.substr(dot + 5)});
+        }
+    return out;
+}
+
+// Song rows on artist pages and playlists: title, artist, (plays), album; the length is a fixed column.
+inline std::vector<Track> parseSongRows(const Json& items) {
+    std::vector<Track> out;
+    for (auto& item : items.items()) {
+        const Json& r = item["musicResponsiveListItemRenderer"];
+        const std::string& id = r["playlistItemData"]["videoId"].str();
+        if (id.empty()) continue;
+        std::vector<std::string> cols;
+        for (int i = 0; i < 4; ++i) {
+            std::string c = runsText(r["flexColumns"][i]["musicResponsiveListItemFlexColumnRenderer"]["text"]["runs"]);
+            if (!endsWith(c, " plays") && !endsWith(c, " views")) cols.push_back(c);
+        }
+        const Json& thumbs = r["thumbnail"]["musicThumbnailRenderer"]["thumbnail"]["thumbnails"];
+        Track t{id, cols.size() > 0 ? cols[0] : "", cols.size() > 1 ? cols[1] : "", cols.size() > 2 ? cols[2] : "",
+                runsText(r["fixedColumns"][0]["musicResponsiveListItemFixedColumnRenderer"]["text"]["runs"]),
+                thumbs[int(thumbs.size()) - 1]["url"].str()};
+        out.push_back(std::move(t));
+    }
+    return out;
+}
+
+// The artist's page: name, top songs, the "See all" playlist and "Fans might also like".
+inline void parseArtistBrowse(const std::string& body, ArtistInfo& info) {
+    Json j = Json::parse(body);
+    std::string title = runsText(j["header"]["musicImmersiveHeaderRenderer"]["title"]["runs"]);
+    if (title.empty()) title = runsText(j["header"]["musicVisualHeaderRenderer"]["title"]["runs"]);
+    if (!title.empty()) info.ref.name = title;
+    const Json& sections = j["contents"]["singleColumnBrowseResultsRenderer"]["tabs"][0]["tabRenderer"]["content"]
+                            ["sectionListRenderer"]["contents"];
+    for (auto& section : sections.items()) {
+        const Json& shelf = section["musicShelfRenderer"];
+        if (!shelf.isNull()) {
+            info.tracks = parseSongRows(shelf["contents"]);
+            info.allSongs = shelf["bottomEndpoint"]["browseEndpoint"]["browseId"].str();
+            if (info.allSongs.empty()) info.allSongs = shelf["title"]["runs"][0]["navigationEndpoint"]["browseEndpoint"]["browseId"].str();
+            continue;
+        }
+        const Json& carousel = section["musicCarouselShelfRenderer"];
+        if (runsText(carousel["header"]["musicCarouselShelfBasicHeaderRenderer"]["title"]["runs"]).rfind("Fans", 0) != 0) continue;
+        for (auto& item : carousel["contents"].items()) {
+            const Json& r = item["musicTwoRowItemRenderer"];
+            const std::string& id = r["navigationEndpoint"]["browseEndpoint"]["browseId"].str();
+            if (id.empty()) continue;
+            const Json& thumbs = r["thumbnailRenderer"]["musicThumbnailRenderer"]["thumbnail"]["thumbnails"];
+            info.related.push_back({runsText(r["title"]["runs"]), id, thumbs[int(thumbs.size()) - 1]["url"].str()});
+        }
+    }
+}
+
+inline std::vector<Track> parsePlaylistSongs(const std::string& body) {
+    Json j = Json::parse(body);
+    return parseSongRows(j["contents"]["twoColumnBrowseResultsRenderer"]["secondaryContents"]["sectionListRenderer"]
+                          ["contents"][0]["musicPlaylistShelfRenderer"]["contents"]);
+}
+
+// Any YouTube Music image URL at another size ("=w120-h120-p-l90-rj" → "=w544-h544-p-l90-rj").
+inline std::string resizedArt(const std::string& url, int px) {
+    size_t w = url.find("=w");
+    if (w == std::string::npos) return url;
+    size_t h = url.find("-h", w);
+    if (h == std::string::npos) return url;
+    size_t end = h + 2;
+    while (end < url.size() && isdigit((unsigned char)url[end])) ++end;
+    std::string n = std::to_string(px);
+    return url.substr(0, w) + "=w" + n + "-h" + n + url.substr(end);
+}
+
 inline std::vector<Track> parseRadio(const std::string& body) {
     std::vector<Track> out;
     Json j = Json::parse(body);

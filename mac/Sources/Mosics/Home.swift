@@ -110,8 +110,10 @@ private struct NowSpinningCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("NOW SPINNING").font(.system(size: 11.5, weight: .bold)).tracking(1.2).foregroundStyle(Retro.accentText)
                     Text(t.title).font(.display(30)).lineLimit(2)
-                    Text([t.artist, t.album].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.system(size: 14)).foregroundStyle(Retro.muted).lineLimit(1)
+                    HStack(spacing: 0) {
+                        ArtistLink(credit: t.artist, font: .system(size: 14), color: Retro.muted).fixedSize()
+                        if !t.album.isEmpty { Text(" · " + t.album).font(.system(size: 14)).foregroundStyle(Retro.muted).lineLimit(1) }
+                    }
                     HStack(spacing: 10) {
                         Button(action: player.togglePlay) {
                             Label(player.isPlaying ? "Pause" : "Resume", systemImage: player.isPlaying ? "pause.fill" : "play.fill")

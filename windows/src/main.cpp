@@ -24,7 +24,7 @@ enum : int {
     TIMER_TICK = 1, TIMER_SEARCH, TIMER_SPIN, TIMER_ANIM, TIMER_ART,
     HOTKEY_PLAY = 1, HOTKEY_NEXT, HOTKEY_PREV,
     ID_PLAY = 1000, ID_PLAYNEXT, ID_ADDQUEUE, ID_RADIO, ID_LIKE, ID_NEWPL_WITH, ID_REMOVE_PL, ID_REMOVE_Q, ID_COPYLINK,
-    ID_PL_RENAME, ID_PL_COVER, ID_PL_DELETE, ID_SAVE_MIX,
+    ID_PL_RENAME, ID_PL_COVER, ID_PL_DELETE, ID_SAVE_MIX, ID_ARTIST,
     ID_TRAY_PLAY, ID_TRAY_NEXT, ID_TRAY_PREV, ID_TRAY_LIKE, ID_TRAY_OPEN, ID_TRAY_QUIT,
     ID_ADDPL_BASE = 2000,
 };
@@ -169,6 +169,7 @@ static void Navigate(Page p, const string& id = "") {
     PostMessageW(g_hwnd, WM_APP_LAYOUT, 0, 0);
     if (p == Page::Search) {
         g_focusSearch = true;   // once the box is placed (after the next paint)
+        if (g.results.empty() && !g.searching && !Trim(g.query).empty()) StartSearch();   // last search, after a restart
     } else {
         SetFocus(g_hwnd);
     }
@@ -214,6 +215,72 @@ static void ShowMain() {
 static void Quit() {
     g_quitting = true;
     DestroyWindow(g_hwnd);
+}
+
+// ───────────────────────────── Light & dark ─────────────────────────────
+
+static bool WindowsUsesDark() {
+    DWORD light = 1, size = sizeof light;
+    return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                        L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size) == ERROR_SUCCESS && light == 0;
+}
+
+// Title bar colours, and (Windows 10 1903+) dark context menus through uxtheme's unnamed exports 135/136.
+static void ThemeWindow(HWND h) {
+    BOOL dark = pal::dark;
+    DwmSetWindowAttribute(h, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark);
+    COLORREF caption = CR(pal::paper), text = CR(pal::ink);
+    DwmSetWindowAttribute(h, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof caption);
+    DwmSetWindowAttribute(h, 36 /* DWMWA_TEXT_COLOR */, &text, sizeof text);
+}
+
+static void ApplyTheme(bool force = false) {
+    bool dark = g.appearance == 2 || (g.appearance == 0 && WindowsUsesDark());
+    if (!force && dark == pal::dark) return;
+    SetPalette(dark);
+    g_shapes.clear();   // shadows and grooves are coloured by the theme
+    if (g_brCard) DeleteObject(g_brCard);
+    if (g_brPaper) DeleteObject(g_brPaper);
+    ApplyTheme(true);   // also creates the brushes
+    if (HMODULE ux = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)) {
+        auto setMode = (int(WINAPI*)(int))(void*)GetProcAddress(ux, MAKEINTRESOURCEA(135));   // SetPreferredAppMode
+        auto flush = (void(WINAPI*)())(void*)GetProcAddress(ux, MAKEINTRESOURCEA(136));       // FlushMenuThemes
+        if (setMode) setMode(dark ? 2 /* ForceDark */ : 3 /* ForceLight */);
+        if (flush) flush();
+    }
+    if (g_hwnd) {
+        ThemeWindow(g_hwnd);
+        if (g_search) InvalidateRect(g_search, nullptr, TRUE);
+        Redraw();
+    }
+}
+
+static void AppearanceMenu() {
+    POINT pt;
+    GetCursorPos(&pt);
+    HMENU m = CreatePopupMenu();
+    const wchar_t* names[] = {L"Match Windows", L"Light", L"Dark"};
+    for (int i = 0; i < 3; ++i) AppendMenuW(m, MF_STRING | (g.appearance == i ? MF_CHECKED : 0), 1 + i, names[i]);
+    int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, g_hwnd, nullptr);
+    DestroyMenu(m);
+    if (cmd >= 1 && cmd <= 3) {
+        g.appearance = cmd - 1;
+        SaveSettings();
+        ApplyTheme();
+    }
+}
+
+// Opens the page of the first credited artist ("A & B feat. C" → A), or a known artist.
+static void OpenArtist(ytmusic::ArtistRef ref) {
+    if (ref.browseId.empty()) {
+        Track t;
+        t.artist = ref.name;
+        ref.name = MainArtist(t);
+    }
+    if (ref.name.empty()) return;
+    LoadArtist(ref);
+    g_shelfTarget[2] = 0;
+    Navigate(Page::Artist, ArtistKey(ref));
 }
 
 // ───────────────────────────── Prompt dialog ─────────────────────────────
@@ -262,8 +329,7 @@ static bool PromptText(const wchar_t* title, wstring& value) {
     HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, L"MosicsPrompt", title, WS_POPUP | WS_CAPTION | WS_SYSMENU,
                                (orc.left + orc.right - w) / 2, (orc.top + orc.bottom - h) / 2, w, h, g_hwnd, nullptr,
                                g_inst, nullptr);
-    COLORREF cap = CR(pal::paper);
-    DwmSetWindowAttribute(dlg, 35 /* DWMWA_CAPTION_COLOR */, &cap, sizeof cap);
+    ThemeWindow(dlg);
     SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)&st);
     RECT cr;
     GetClientRect(dlg, &cr);
@@ -273,7 +339,10 @@ static bool PromptText(const wchar_t* title, wstring& value) {
                               cr.right - IPX(212), cr.bottom - IPX(48), IPX(94), IPX(30), dlg, (HMENU)IDOK, g_inst, nullptr);
     HWND cancel = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                                   cr.right - IPX(112), cr.bottom - IPX(48), IPX(94), IPX(30), dlg, (HMENU)IDCANCEL, g_inst, nullptr);
-    for (HWND c : {st.edit, ok, cancel}) SendMessageW(c, WM_SETFONT, (WPARAM)g_editFont, TRUE);
+    for (HWND c : {st.edit, ok, cancel}) {
+        SendMessageW(c, WM_SETFONT, (WPARAM)g_editFont, TRUE);
+        if (pal::dark) SetWindowTheme(c, c == st.edit ? L"DarkMode_CFD" : L"DarkMode_Explorer", nullptr);
+    }
     SendMessageW(st.edit, EM_SETSEL, 0, -1);
     EnableWindow(g_hwnd, FALSE);
     ShowWindow(dlg, SW_SHOW);
@@ -374,6 +443,7 @@ static void TrackMenu(const Track& t, int kind, int index, POINT pt) {
     AppendMenuW(m, MF_STRING, ID_PLAYNEXT, L"Play Next");
     AppendMenuW(m, MF_STRING, ID_ADDQUEUE, L"Add to Queue");
     AppendMenuW(m, MF_STRING, ID_RADIO, L"Start Radio");
+    AppendMenuW(m, MF_STRING, ID_ARTIST, L"Go to Artist");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, ID_LIKE, IsLiked(t.id) ? L"Remove from Liked Songs" : L"Save to Liked Songs");
     AppendMenuW(pl, MF_STRING, ID_NEWPL_WITH, L"New Playlist");
@@ -391,6 +461,7 @@ static void TrackMenu(const Track& t, int kind, int index, POINT pt) {
     case ID_PLAYNEXT: PlayNext(t); break;
     case ID_ADDQUEUE: AddToQueue(t); break;
     case ID_RADIO: StartRadio(t); break;
+    case ID_ARTIST: OpenArtist({t.artist, "", ""}); break;
     case ID_LIKE: ToggleLike(t); break;
     case ID_NEWPL_WITH: AddToPlaylist(t, NewPlaylist(t.title)); break;
     case ID_REMOVE_PL:
@@ -557,6 +628,20 @@ static void Activate(int act, int arg) {
     case aSheetImage: ChooseCoverImage(g.coverSheet); break;
     case aSheetReset: SetCover(g.coverSheet, Playlist::Auto); break;
     case aSheetDone: g.coverSheet.clear(); break;
+    case aArtistLink: if (arg < (int)g_view.size()) OpenArtist({g_view[arg].artist, "", ""}); break;
+    case aArtistCurrent: if (const Track* t = g.current()) OpenArtist({t->artist, "", ""}); break;
+    case aRelated:
+        if (auto it = g.artists.find(g.pageId); it != g.artists.end() && arg < (int)it->second.related.size())
+            OpenArtist(ytmusic::ArtistRef(it->second.related[arg]));
+        break;
+    case aArtistRadio: if (!g_view.empty()) StartRadio(g_view[0]); break;
+    case aMute: {
+        static float before = 0.8f;
+        if (g.volume > 0.001f) { before = g.volume; SetVolume(0); } else SetVolume(std::max(before, 0.1f));
+        SaveSettings();
+        break;
+    }
+    case aAppearance: AppearanceMenu(); break;
     case aSetupGo:
         if (g_setup.phase == 2) { g_setup.visible = false; g.error.clear(); RefreshShelves(false); }
         else StartSetup();
@@ -574,7 +659,7 @@ static void ContextMenuAt(float x, float y, POINT screen) {
     const Hit* h = HitAt(x, y);
     if (!h) return;
     int act = h->act, arg = h->arg;
-    if ((act == aRow || act == aRowPlay || act == aRowLike) && arg < (int)g_view.size()) {
+    if ((act == aRow || act == aRowPlay || act == aRowLike || act == aArtistLink) && arg < (int)g_view.size()) {
         Track t = g_view[arg];
         TrackMenu(t, g_viewKind, arg, screen);
     } else if (act == aRecentTile && arg < (int)g.recent.size()) {
@@ -601,7 +686,7 @@ static void DragTo(float x, float y) {
         Redraw();
         break;
     }
-    case aVolume: SetVolume(g_drag.v0 + ((g_drag.y0 - y) + (x - g_drag.x0)) / 160.0f); break;
+    case aVolume: SetVolume((x - g_volumeBox.x) / std::max(1.0f, g_volumeBox.w)); break;
     case aScrollbar:
         g_scroll = g_scrollTarget = std::clamp(g_drag.v0 + (y - g_drag.y0) * (g_contentH / std::max(1.0f, g_viewH)), 0.0f,
                                                std::max(0.0f, g_contentH - g_viewH));
@@ -663,10 +748,10 @@ static void Hover(float x, float y) {
 static void Wheel(float x, float y, int delta, bool horizontal) {
     if (!g.coverSheet.empty() || g_setup.visible || g.nowPlaying) return;
     auto in = [&](const ClipRect& c) { return x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h; };
-    if (in(g_volumeKnob)) { SetVolume(g.volume + delta / 120.0f * 0.05f); SaveSettings(); return; }
+    if (in(g_volumeBox)) { SetVolume(g.volume + delta / 120.0f * 0.05f); SaveSettings(); return; }
     bool shift = GetKeyState(VK_SHIFT) < 0;
-    if (g.page == Page::Home && (horizontal || shift)) {
-        for (int i = 0; i < 2; ++i)
+    if (horizontal || shift) {
+        for (int i = 0; i < 3; ++i)
             if (in(g_shelfBox[i])) { ScrollShelf(i, (horizontal ? delta : -delta) / 120.0f * 90); return; }
     }
     if (horizontal) return;
@@ -721,9 +806,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_CREATE: {
         g_hwnd = h;
         SetScale(GetDpiForWindow(h));
-        COLORREF caption = CR(pal::paper), text = CR(pal::ink);
-        DwmSetWindowAttribute(h, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof caption);
-        DwmSetWindowAttribute(h, 36 /* DWMWA_TEXT_COLOR */, &text, sizeof text);
+        ThemeWindow(h);
         g_search = CreateWindowExW(0, L"EDIT", W(g.query).c_str(), WS_CHILD | ES_AUTOHSCROLL, 0, 0, 0, 0, h,
                                    (HMENU)IDC_SEARCH, g_inst, nullptr);
         SendMessageW(g_search, WM_SETFONT, (WPARAM)g_editFont, TRUE);
@@ -895,6 +978,15 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         return 0;
     case WM_APP_SHOW: ShowMain(); return 0;
+    case WM_SETTINGCHANGE:   // Windows switched between light and dark
+        if (l && lstrcmpW((LPCWSTR)l, L"ImmersiveColorSet") == 0) ApplyTheme();
+        break;
+    case WM_APP_ARTIST: {
+        auto* r = (ArtistResult*)l;
+        OnArtist(r);
+        delete r;
+        return 0;
+    }
     case WM_APP_QUIT: Quit(); return 0;
     case WM_APP_SEARCH: {
         auto* r = (SearchResult*)l;

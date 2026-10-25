@@ -61,6 +61,95 @@ enum YTMusic {
         return Page(tracks: out, next: out.isEmpty ? nil : next)
     }
 
+    // MARK: Artists
+
+    /// An artist to open: the name is enough, the channel id makes it exact.
+    struct ArtistRef: Hashable, Codable {
+        var name: String
+        var browseId: String = ""
+        var photo: String = ""
+    }
+
+    struct ArtistPage {
+        var ref: ArtistRef
+        var audience: String      // "33.2M monthly audience"
+        var tracks: [Track]       // most played first (up to 100)
+        var related: [ArtistRef]  // "Fans might also like"
+    }
+
+    static func artist(_ ref: ArtistRef) async throws -> ArtistPage {
+        var ref = ref
+        var audience = ""
+        if ref.browseId.isEmpty {   // find the channel: the first "Artists" result with this exact name
+            let json = try await post("search", ["query": ref.name, "params": "EgWKAQIgAWoKEAkQBRAKEAMQBA%3D%3D"])
+            let sections = jv(json, "contents", "tabbedSearchResultsRenderer", "tabs", 0, "tabRenderer",
+                              "content", "sectionListRenderer", "contents") as? [Any] ?? []
+            var found: [(ArtistRef, String)] = []
+            for section in sections {
+                for item in jv(section, "musicShelfRenderer", "contents") as? [Any] ?? [] {
+                    guard let r = jv(item, "musicResponsiveListItemRenderer"),
+                          let id = jv(r, "navigationEndpoint", "browseEndpoint", "browseId") as? String else { continue }
+                    let thumbs = jv(r, "thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails") as? [Any]
+                    let sub = runsText(jv(r, "flexColumns", 1, "musicResponsiveListItemFlexColumnRenderer", "text", "runs"))
+                    found.append((ArtistRef(name: runsText(jv(r, "flexColumns", 0, "musicResponsiveListItemFlexColumnRenderer", "text", "runs")),
+                                            browseId: id, photo: jv(thumbs?.last, "url") as? String ?? ""),
+                                  sub.components(separatedBy: " • ").last ?? ""))
+                }
+            }
+            guard let pick = found.first(where: { Suggestions.matches($0.0.name, ref.name) }) ?? found.first else {
+                return ArtistPage(ref: ref, audience: "", tracks: [], related: [])
+            }
+            ref = pick.0
+            audience = pick.1
+        }
+        let page = try await post("browse", ["browseId": ref.browseId])
+        if let title = jv(page, "header", "musicImmersiveHeaderRenderer", "title", "runs") ?? jv(page, "header", "musicVisualHeaderRenderer", "title", "runs") {
+            let t = runsText(title)
+            if !t.isEmpty { ref.name = t }
+        }
+        let sections = jv(page, "contents", "singleColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content",
+                          "sectionListRenderer", "contents") as? [Any] ?? []
+        var tracks: [Track] = [], related: [ArtistRef] = [], allSongs: String?
+        for section in sections {
+            if let shelf = jv(section, "musicShelfRenderer") {   // "Top songs"
+                tracks = parseSongRows(jv(shelf, "contents") as? [Any] ?? [])
+                allSongs = jv(shelf, "bottomEndpoint", "browseEndpoint", "browseId") as? String
+                    ?? jv(shelf, "title", "runs", 0, "navigationEndpoint", "browseEndpoint", "browseId") as? String
+            } else if let carousel = jv(section, "musicCarouselShelfRenderer"),
+                      runsText(jv(carousel, "header", "musicCarouselShelfBasicHeaderRenderer", "title", "runs")).hasPrefix("Fans") {
+                for item in jv(carousel, "contents") as? [Any] ?? [] {
+                    guard let r = jv(item, "musicTwoRowItemRenderer"),
+                          let id = jv(r, "navigationEndpoint", "browseEndpoint", "browseId") as? String else { continue }
+                    let thumbs = jv(r, "thumbnailRenderer", "musicThumbnailRenderer", "thumbnail", "thumbnails") as? [Any]
+                    related.append(ArtistRef(name: runsText(jv(r, "title", "runs")), browseId: id,
+                                             photo: jv(thumbs?.last, "url") as? String ?? ""))
+                }
+            }
+        }
+        // "See all" songs: a playlist of the artist's songs, most played first.
+        if let all = allSongs, let list = try? await post("browse", ["browseId": all]) {
+            let shelf = jv(list, "contents", "twoColumnBrowseResultsRenderer", "secondaryContents", "sectionListRenderer",
+                           "contents", 0, "musicPlaylistShelfRenderer", "contents") as? [Any] ?? []
+            let more = parseSongRows(shelf)
+            if more.count > tracks.count { tracks = more }
+        }
+        return ArtistPage(ref: ref, audience: audience, tracks: tracks, related: related)
+    }
+
+    /// Song rows on artist pages and playlists: title, artist, (plays), album, with the length in a fixed column.
+    private static func parseSongRows(_ items: [Any]) -> [Track] {
+        items.compactMap { item in
+            guard let r = jv(item, "musicResponsiveListItemRenderer"),
+                  let id = jv(r, "playlistItemData", "videoId") as? String else { return nil }
+            let cols = (0..<4).map { runsText(jv(r, "flexColumns", $0, "musicResponsiveListItemFlexColumnRenderer", "text", "runs")) }
+                .filter { !$0.hasSuffix(" plays") && !$0.hasSuffix(" views") }
+            let thumbs = jv(r, "thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails") as? [Any]
+            let length = runsText(jv(r, "fixedColumns", 0, "musicResponsiveListItemFixedColumnRenderer", "text", "runs"))
+            return Track(id: id, title: cols.first ?? "", artist: cols.count > 1 ? cols[1] : "", album: cols.count > 2 ? cols[2] : "",
+                         duration: length, thumb: jv(thumbs?.last, "url") as? String ?? "")
+        }
+    }
+
     /// Songs similar to `id` — used to keep the music going when the queue runs out.
     static func radio(for id: String) async throws -> [Track] {
         let json = try await post("next", ["videoId": id, "playlistId": "RDAMVM" + id, "isAudioOnly": true])

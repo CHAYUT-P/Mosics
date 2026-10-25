@@ -17,14 +17,33 @@ using Gdiplus::Bitmap;
 
 // ───────────────────────────── Palette (Swiss Red) ─────────────────────────────
 
+// The current colours. SetPalette() switches between Swiss Red (light) and Swiss Red Dark — the same
+// values as Palette.swift in the Mac app.
 namespace pal {
-constexpr DWORD paper = 0xF5F4F0, sidebar = 0xECEBE6, line = 0xD6D4CC, card = 0xFFFFFF, linen = 0xE6E4DD,
-                rowPlaying = 0xFBE5E3, rowHover = 0xEFEEE9, ink = 0x121212, inkSoft = 0x2E2E2E, muted = 0x666660,
-                accent = 0xD7261E, accentText = 0xC0211A, onAccent = 0xFFFFFF, gold = 0x121212, alt = 0x9A9A92,
-                danger = 0xC0211A, selectedBg = 0x121212, selectedText = 0xFFFFFF, shadow = 0x121212, track = 0xDEDCD5,
-                bar = 0x121212, barText = 0xFFFFFF, barMuted = 0xA8A8A2, barTrack = 0x3A3A3A, barHighlight = 0xFF3B30,
-                barDanger = 0xFF8A80, knobLight = 0x4A4A4A, knobDark = 0x1A1A1A, vinyl = 0x111111, groove = 0x242424,
-                grooveGap = 0x333333, spindle = 0xF5F4F0;
+static DWORD paper, sidebar, line, card, linen, rowPlaying, rowHover, ink, inkSoft, muted, accent, accentText, onAccent,
+    gold, alt, danger, selectedBg, selectedText, shadow, track, bar, barText, barMuted, barTrack, barHighlight, barDanger,
+    knobLight, knobDark, vinyl, groove, grooveGap, spindle;
+static bool dark = false;
+}
+
+static void SetPalette(bool dark) {
+    using namespace pal;
+    pal::dark = dark;
+    if (!dark) {
+        paper = 0xF5F4F0; sidebar = 0xECEBE6; line = 0xD6D4CC; card = 0xFFFFFF; linen = 0xE6E4DD;
+        rowPlaying = 0xFBE5E3; rowHover = 0xEFEEE9; ink = 0x121212; inkSoft = 0x2E2E2E; muted = 0x666660;
+        accent = 0xD7261E; accentText = 0xC0211A; onAccent = 0xFFFFFF; gold = 0x121212; alt = 0x9A9A92;
+        danger = 0xC0211A; selectedBg = 0x121212; selectedText = 0xFFFFFF; shadow = 0x121212; track = 0xDEDCD5;
+        bar = 0x121212; vinyl = 0x111111; groove = 0x242424; grooveGap = 0x333333; spindle = 0xF5F4F0;
+    } else {
+        paper = 0x161616; sidebar = 0x1D1D1C; line = 0x2F2F2D; card = 0x1F1F1E; linen = 0x2A2A28;
+        rowPlaying = 0x3A1B18; rowHover = 0x272726; ink = 0xF2F1EC; inkSoft = 0xD6D4CC; muted = 0x9A9A92;
+        accent = 0xE0302A; accentText = 0xFF5A4F; onAccent = 0xFFFFFF; gold = 0xF2F1EC; alt = 0x6E6E6A;
+        danger = 0xFF6B61; selectedBg = 0xF2F1EC; selectedText = 0x121212; shadow = 0x000000; track = 0x333331;
+        bar = 0x0C0C0C; vinyl = 0x0A0A0A; groove = 0x1F1F1F; grooveGap = 0x2E2E2E; spindle = 0x161616;
+    }
+    barText = 0xFFFFFF; barMuted = 0xA8A8A2; barTrack = 0x3A3A3A; barHighlight = 0xFF3B30; barDanger = 0xFF8A80;
+    knobLight = 0x4A4A4A; knobDark = 0x1A1A1A;
 }
 
 // Colours for a retro sunset sleeve and its record label.
@@ -250,7 +269,7 @@ static void SkipGlyph(float cx, float cy, float s, DWORD c, bool forward) {
 // A blurred silhouette, rendered once per size and cached. SwiftUI-style: blur radius, y offset, opacity.
 static Bitmap* ShadowBitmap(int w, int h, int rad, int blur, bool circle, float opacity) {
     char key[96];
-    snprintf(key, sizeof key, "sh%d.%d.%d.%d.%d.%d", w, h, rad, blur, circle, (int)(opacity * 100));
+    snprintf(key, sizeof key, "sh%d.%d.%d.%d.%d.%d.%06lx", w, h, rad, blur, circle, (int)(opacity * 100), (unsigned long)pal::shadow);
     if (Bitmap* hit = g_shapes.get(key)) return hit;
     int pad = blur * 2, W2 = w + 2 * pad, H2 = h + 2 * pad;
     vector<float> a((size_t)W2 * H2, 0.0f);
@@ -302,13 +321,13 @@ static Bitmap* ShadowBitmap(int w, int h, int rad, int blur, bool circle, float 
     Gdiplus::Rect all(0, 0, W2, H2);
     Gdiplus::BitmapData d;
     if (out->LockBits(&all, Gdiplus::ImageLockModeWrite, PixelFormat32bppPARGB, &d) == Gdiplus::Ok) {
-        const uint32_t c = 0x12;   // shadow colour #121212, premultiplied below
+        const DWORD sc = pal::shadow;   // premultiplied below
         for (int y = 0; y < H2; ++y) {
             auto* row = (uint32_t*)((BYTE*)d.Scan0 + (size_t)y * d.Stride);
             for (int x = 0; x < W2; ++x) {
                 uint32_t al = (uint32_t)std::lround(std::clamp(a[(size_t)y * W2 + x] * opacity, 0.0f, 1.0f) * 255);
-                uint32_t v = c * al / 255;
-                row[x] = (al << 24) | (v << 16) | (v << 8) | v;
+                uint32_t r = ((sc >> 16) & 255) * al / 255, gr = ((sc >> 8) & 255) * al / 255, b = (sc & 255) * al / 255;
+                row[x] = (al << 24) | (r << 16) | (gr << 8) | b;
             }
         }
         out->UnlockBits(&d);
@@ -630,7 +649,7 @@ static double g_spinAngle = 0;   // degrees, advanced by the spin timer while mu
 // Grooves, drawn once per size: ~100 rings per record per frame would be the costliest thing on screen.
 static Bitmap* Grooves(int px, float labelRatio) {
     char key[48];
-    snprintf(key, sizeof key, "gr%d.%d", px, (int)(labelRatio * 100));
+    snprintf(key, sizeof key, "gr%d.%d.%d", px, (int)(labelRatio * 100), (int)pal::dark);
     if (Bitmap* hit = g_shapes.get(key)) return hit;
     auto* b = new Bitmap(px, px, PixelFormat32bppPARGB);
     Gdiplus::Graphics g(b);

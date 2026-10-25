@@ -18,6 +18,7 @@ enum Act {
     aMoreMenu, aEditCover, aSaveMix, aNewMixes, aSeeAll, aRecentTile, aMixTile, aSearchPill, aKind, aClearSearch,
     aAutoplay, aClearQueue, aStartRadio, aShelfPrev, aShelfNext, aUpNextRow, aLPSleeve, aHomeSleeve, aSheetStyle,
     aSheetArtwork, aSheetImage, aSheetReset, aSheetDone, aSetupGo, aSetupLater, aSearchField, aScrollbar,
+    aArtistLink, aArtistCurrent, aRelated, aArtistRadio, aMute, aAppearance,
 };
 
 struct Hit { float x, y, w, h; int act, arg; bool hand; };
@@ -91,12 +92,12 @@ static void AddSpinJob(float x, float y, float w, float h, DWORD bg, std::functi
 static float g_scroll = 0, g_scrollTarget = 0, g_contentH = 0, g_viewH = 0;
 static float g_sideScroll = 0, g_sideH = 0;
 static ClipRect g_sideList{}, g_content{};
-static float g_shelfTarget[2] = {0, 0};   // Home: mixes, recent
-static ClipRect g_shelfBox[2]{};
-static float g_shelfMax[2] = {0, 0};
+static float g_shelfTarget[3] = {0, 0, 0};   // Home mixes, Home recent, artist "Fans might also like"
+static ClipRect g_shelfBox[3]{};
+static float g_shelfMax[3] = {0, 0, 0};
 static ClipRect g_searchBox{};            // where the search text box goes (DIPs); w == 0 hides it
 static ClipRect g_seekTrack[2]{};         // bar, Now Playing
-static ClipRect g_volumeKnob{};
+static ClipRect g_volumeBox{};
 static bool g_listNearEnd = false;
 
 struct Drag { int act = aNone; float x0 = 0, y0 = 0, v0 = 0; double value = 0; } g_drag;
@@ -199,31 +200,36 @@ static void Scrubber(float x, float y, float w, double time, double dur, DWORD t
     g_tickBoxes.push_back({x, y - 6, w, 28});
 }
 
-// Retro volume knob: drag up/down (or scroll) to turn it.
-static void VolumeKnob(float x, float y) {
-    float s = 34, cx = x + s / 2, cy = y + s / 2;
-    if (Visible(x, y, s, s)) {
-        Gdiplus::GraphicsPath p;
-        p.AddEllipse(PX(x), PX(y), PX(s), PX(s));
-        Gdiplus::PathGradientBrush b(&p);
-        b.SetCenterPoint(Gdiplus::PointF(PX(x + s * 0.35f), PX(y + s * 0.3f)));
-        b.SetCenterColor(GC(pal::knobLight));
-        Gdiplus::Color surround[1] = {GC(pal::knobDark)};
-        INT n = 1;
-        b.SetSurroundColors(surround, &n);
-        R.g->FillPath(&b, &p);
-        StrokeCircle(cx, cy, s / 2, pal::barTrack, 2);
-        R.g->TranslateTransform(PX(cx), PX(cy));
-        R.g->RotateTransform(-135.0f + 270.0f * g.volume);
-        Gdiplus::GraphicsPath ind;
-        RoundPath(ind, PX(-1.5f), PX(-13.5f), PX(3), PX(9), PX(1.5f));
-        Gdiplus::SolidBrush red(GC(pal::barHighlight));
-        R.g->FillPath(&red, &ind);
-        R.g->ResetTransform();
+// Volume: a speaker (click to mute) and a slider you can click, drag or scroll.
+static void VolumeSlider(float x, float cy) {
+    const float tw = 96;
+    float v = std::clamp(g.volume, 0.0f, 1.0f);
+    const wchar_t* icon = v <= 0.001f ? L"\xE74F" : v < 0.34f ? L"\xE993" : v < 0.67f ? L"\xE994" : L"\xE995";
+    Icon(icon, x + 9, cy, 14, Hov(aMute) ? pal::barText : pal::barMuted);
+    AddHit(x - 4, cy - 14, 26, 28, aMute);
+    float tx = x + 28;
+    bool active = Hov(aVolume) || g_drag.act == aVolume;
+    FillRound(tx, cy - 2, tw, 4, 2, pal::barTrack);
+    if (v > 0) FillRound(tx, cy - 2, std::max(4.0f, tw * v), 4, 2, active ? pal::barHighlight : pal::barText);
+    if (active) {
+        Shadow(tx + tw * v - 6, cy - 6, 12, 12, 0, 2, 1, 0.3f, true);
+        FillCircle(tx + tw * v, cy, 6, pal::barText);
     }
-    AddHit(x, y, s, s, aVolume, 0, true);
-    g_volumeKnob = {x, y, s, s};
+    AddHit(tx - 6, cy - 12, tw + 12, 24, aVolume);
+    g_volumeBox = {tx, cy - 12, tw, 24};
 }
+
+// "Artist · Album" where the artist is a link to their page (underlined on hover).
+static void ArtistText(const wstring& artist, const wstring& rest, float x, float y, float w, float h, Fnt f, DWORD color,
+                       int act, int arg = 0) {
+    float aw = std::min(TextWidth(artist, f), std::max(0.0f, w));
+    Text(artist, x, y, aw + 2, h, f, color);
+    if (aw > 0) AddHit(x, y + 1, aw, h - 2, act, arg);
+    if (Hov(act, arg)) FillRect(x, std::round(y + h / 2 + f.size * 0.58f), aw, 1, color);
+    if (!rest.empty() && aw < w) Text(rest, x + aw, y, w - aw, h, f, color);
+}
+
+static wstring AlbumSuffix(const Track& t) { return t.album.empty() ? L"" : L" \x00B7 " + W(t.album); }
 
 // A record that spins on its own when music plays, without the sleeve.
 static void SpinningRecord(float x, float y, float size, const string& art, bool spinning, DWORD bg) {
@@ -308,10 +314,14 @@ static float TrackList(const vector<Track>& tracks, float x, float y, float w, i
         AddHit(rx, ry, rw, rowH, aRow, n, false);
         AddHit(rx + 10, ry, 36, rowH, aRowPlay, n);
         AddHit(heartX - 4, ry + 12, 24, 28, aRowLike, n);
-        if (!Visible(rx, ry, rw, rowH)) continue;
+        float textX = rx + 10 + 36 + 14 + 38 + 14, textR = heartX - 14 - (wide ? 200 + 14 : 0);
+        if (!Visible(rx, ry, rw, rowH)) {
+            AddHit(textX, ry + 28, std::min(TextWidth(W(t.artist), UIF(12.5f)), textR - textX), 16, aArtistLink, n);
+            continue;
+        }
 
         bool isCurrent = kind != kQueue && cur && cur->id == t.id;
-        bool hover = Hov(aRow, n) || Hov(aRowPlay, n) || Hov(aRowLike, n);
+        bool hover = Hov(aRow, n) || Hov(aRowPlay, n) || Hov(aRowLike, n) || Hov(aArtistLink, n);
         if (isCurrent) FillRound(rx, ry, rw, rowH, 8, pal::rowPlaying);
         else if (hover) FillRound(rx, ry, rw, rowH, 8, pal::rowHover);
         FillRect(rx + 4, ry + rowH - 1, rw - 8, 1, pal::linen);
@@ -324,20 +334,16 @@ static float TrackList(const vector<Track>& tracks, float x, float y, float w, i
         Text(W(t.duration), right - 44, ry, 44, rowH, UIF(12.5f), pal::muted, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         bool liked = IsLiked(t.id);
         if (liked || hover) Icon(liked ? glyph::heartFill : glyph::heart, heartX + 8, ry + rowH / 2, 13, liked ? pal::accent : pal::muted);
-        float textR = heartX - 14;
-        if (wide) {
-            Text(W(t.album), textR - 200, ry, 200, rowH, UIItalic(12.5f), pal::muted);
-            textR -= 200 + 14;
-        }
+        if (wide) Text(W(t.album), heartX - 14 - 200, ry, 200, rowH, UIItalic(12.5f), pal::muted);
         Text(W(t.title), cx, ry + 7, textR - cx, 20, UIF(13.5f, FW_SEMIBOLD), isCurrent ? pal::accentText : pal::ink);
-        Text(W(t.artist), cx, ry + 27, textR - cx, 18, UIF(12.5f), pal::muted);
+        ArtistText(W(t.artist), L"", cx, ry + 27, textR - cx, 18, UIF(12.5f), pal::muted, aArtistLink, n);
     }
     return h;
 }
 
 // ───────────────────────────── LP header ─────────────────────────────
 
-enum HeaderKind { kCollection, kPlaylistHeader, kMixHeader };
+enum HeaderKind { kCollection, kPlaylistHeader, kMixHeader, kArtistHeader };
 
 static float LPHeader(float x, float y, float w, int style, const string& labelArt, const std::function<void(float, float, float)>& sleeve,
                       const wstring& kicker, const wstring& title, const wstring& subtitle, const wstring& meta,
@@ -378,6 +384,7 @@ static float LPHeader(float x, float y, float w, int style, const string& labelA
     bx += 42 + 10;
     if (kind == kPlaylistHeader) CircleBtn(bx, ty, 42, glyph::more, false, aMoreMenu);
     if (kind == kMixHeader) Pill(bx, ty, L"Save to your records", nullptr, false, aSaveMix);
+    if (kind == kArtistHeader) Pill(bx, ty, L"Artist radio", nullptr, false, aArtistRadio, 0, !empty);
     return 200;
 }
 
@@ -413,6 +420,71 @@ static float MixPage(float x, float y, float w, const Shelf* s) {
     float h = LPHeader(x, y, w, style, "", [&](float sx, float sy, float sz) { RetroSleeve(sx, sy, sz, style, title); },
                        L"Mix \x00B7 made for you", title, W(s->subtitle), MetaLine(s->tracks), kMixHeader, false);
     return h + 22 + TrackList(s->tracks, x, y + h + 22, w, kPlain);
+}
+
+static void ShelfArrows(float right, float y, int shelf);
+
+// An artist as an LP: their photo on the sleeve, their songs (most played first), and artists fans also like.
+static float ArtistPage(float x, float y, float w) {
+    float y0 = y;
+    const ytmusic::ArtistInfo* info = nullptr;
+    auto found = g.artists.find(g.pageId);
+    if (found != g.artists.end()) info = &found->second;
+    size_t sep = g.pageId.find('\x1F');
+    string name = info ? info->ref.name : g.pageId.substr(0, sep);
+    string photo = info ? info->ref.photo : "";
+    static const vector<Track> none;
+    const vector<Track>& tracks = info ? info->tracks : none;
+    wstring wname = W(name);
+    int style = SleeveForName(name);
+    wstring meta = !info ? (g.artistFailed[g.pageId] ? L"" : L"Loading\x2026") : MetaLine(tracks);
+    if (info && !info->audience.empty()) meta = W(info->audience) + L" \x00B7 " + meta;
+    float h = LPHeader(x, y, w, style, tracks.empty() ? "" : tracks[0].thumbAt(226),
+                       [&](float sx, float sy, float sz) {
+                           if (photo.empty()) RetroSleeve(sx, sy, sz, style, wname);
+                           else Cover(ytmusic::resizedArt(photo, 544), sx, sy, sz, std::max(4.0f, sz * 0.04f));
+                       },
+                       L"Artist", wname, L"", meta, kArtistHeader, tracks.empty());
+    y += h + 30;
+
+    if (info && !info->related.empty()) {   // Fans might also like
+        Text(L"Fans might also like", x, y, w / 2, 30, Disp(22), pal::ink);
+        ShelfArrows(x + w, y + 1, 2);
+        y += 30 + 12;
+        const float pitch = 96 + 22, rowH = 6 + 92 + 8 + 18 + 6;
+        size_t n = info->related.size();
+        g_shelfMax[2] = std::max(0.0f, n * pitch - 22 - 48 - w);
+        g_shelfTarget[2] = std::clamp(g_shelfTarget[2], 0.0f, g_shelfMax[2]);
+        float off = Tw("shelf2", g_shelfTarget[2]);
+        g_shelfBox[2] = {x - 36, y, w + 72, rowH};
+        PushClip(x - 36, y, w + 72, rowH);
+        for (size_t i = 0; i < n; ++i) {
+            const ytmusic::ArtistRef& a = info->related[i];
+            float tx = x + i * pitch - off, ty = y + 6;
+            if (tx > x + w + 40 || tx + 120 < x - 40) continue;
+            int k = (int)i;
+            AddHit(tx, ty, 96, rowH - 12, aRelated, k);
+            float turn = Tw("rel" + a.browseId, Hov(aRelated, k) ? 24.0f : 0.0f);
+            Shadow(tx + 2, ty, 92, 92, 0, 7, 4, 0.22f, true);
+            Vinyl(tx + 2, ty, 92, ytmusic::resizedArt(a.photo, 226), pal::gold, pal::paper, 0.36f, true, turn);
+            Text(W(a.name), tx, ty + 92 + 8, 96, 18, UIF(12.5f, FW_SEMIBOLD), pal::ink, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
+        PopClip();
+        y += rowH + 24;
+    }
+    if (!tracks.empty()) {
+        Text(L"Songs", x, y, w, 30, Disp(22), pal::ink);
+        y += 30 + 14;
+        y += TrackList(tracks, x, y, w, kPlain);
+    } else {
+        g_view.clear();
+        const wchar_t* msg = !info ? (g.artistFailed[g.pageId] ? L"Couldn't load this artist \x2014 check your connection."
+                                                                 : L"Pulling their records\x2026")
+                                   : L"No songs found for this artist.";
+        Text(msg, x, y, w, 24, DispItalic(15), pal::muted);
+        y += 24;
+    }
+    return y - y0;
 }
 
 // ───────────────────────────── Home ─────────────────────────────
@@ -457,9 +529,7 @@ static void NowSpinningCard(float x, float y, float w) {
         ty += 16 + 6;
         Paragraph(title, tx, ty, tw, tf, pal::ink, 2);
         ty += titleH + 6;
-        wstring line = W(t->artist);
-        if (!t->album.empty()) line += (line.empty() ? L"" : L" \x00B7 ") + W(t->album);
-        Text(line, tx, ty, tw, 20, UIF(14), pal::muted);
+        ArtistText(W(t->artist), AlbumSuffix(*t), tx, ty, tw, 20, UIF(14), pal::muted, aArtistCurrent);
         ty += 20 + 6 + 8;
         float bx = tx + Pill(tx, ty, g.playing ? L"Pause" : L"Resume", g.playing ? kPauseIcon : kPlayIcon, true, aPlayPause) + 10;
         Pill(bx, ty, L"Start radio", nullptr, false, aStartRadio);
@@ -666,7 +736,7 @@ static float QueuePage(float x, float y, float w) {
         float tx = x + 64 + 16;
         Kicker(L"NOW SPINNING", tx, y + 4, w - 80);
         Text(W(now->title), tx, y + 20, w - 80, 28, Disp(20), pal::ink);
-        Text(W(now->artist), tx, y + 46, w - 80, 18, UIF(13), pal::muted);
+        ArtistText(W(now->artist), L"", tx, y + 46, w - 80, 18, UIF(13), pal::muted, aArtistCurrent);
         y += 64 + 18;
     }
     Text(L"Up next", x, y, w, 24, DispItalic(17), pal::inkSoft);
@@ -693,7 +763,13 @@ static void Sidebar(float H) {
     FillRect(kSide, 0, 1, H, pal::line);
     float x = 14, w = kSide - 28, y = 22;
     Vinyl(x + 8, y, 34, "", pal::gold, pal::accent, 0.3f, true);
-    Text(L"mosics", x + 8 + 34 + 10, y - 2, 150, 36, Disp(25), pal::ink);
+    Text(L"mosics", x + 8 + 34 + 10, y - 2, 120, 36, Disp(25), pal::ink);
+    {   // sun / moon: Match Windows, Light or Dark
+        float bx = x + w - 30, by = y + 3;
+        if (Hov(aAppearance)) FillCircle(bx + 14, by + 14, 14, pal::rowHover);
+        Icon(pal::dark ? L"\xE708" : L"\xE706", bx + 14, by + 14, 13, pal::muted);
+        AddHit(bx, by, 28, 28, aAppearance);
+    }
     y += 34 + 18;
     struct Item { Page p; const wchar_t* g; const wchar_t* t; } items[] = {
         {Page::Home, glyph::home, L"Home"}, {Page::Search, glyph::search, L"Search"}, {Page::Liked, glyph::heart, L"Liked Songs"},
@@ -775,16 +851,15 @@ static void PlayerBar(float y0, float Wd) {
         float tx = x + 80 + 12, tw = 290 - 92;
         Text(t ? W(t->title) : L"Nothing playing", tx, y0 + 22, tw, 20, UIF(14, FW_BOLD), pal::barText);
         if (!g.error.empty()) Paragraph(W(g.error), tx, y0 + 43, tw, UIF(12), pal::barDanger, 2);
-        else Text(t ? W(t->artist) : L"Pick a record to play", tx, y0 + 43, tw, 18, UIF(12.5f), pal::barMuted);
+        else if (t) ArtistText(W(t->artist), L"", tx, y0 + 43, tw, 18, UIF(12.5f), pal::barMuted, aArtistCurrent);
+        else Text(L"Pick a record to play", tx, y0 + 43, tw, 18, UIF(12.5f), pal::barMuted);
     }
     // Right: like, queue, volume
     float right = Wd - 20;
     {
-        wstring vol = std::to_wstring((int)std::lround(g.volume * 100));
-        Text(vol, right - 24, y0, 24, kBar, UIF(12), pal::barMuted);
-        float kx = right - 24 - 14 - 34;
-        VolumeKnob(kx, y0 + (kBar - 34) / 2);
-        float lx = kx - 14 - 10;
+        float vx = right - 96 - 28;
+        VolumeSlider(vx, y0 + kBar / 2);
+        float lx = vx - 14 - 12;
         Icon(glyph::list, lx, y0 + kBar / 2, 15, Hov(aQueuePage) || g.page == Page::Queue ? pal::barText : pal::barMuted);
         AddHit(lx - 14, y0 + 28, 28, 32, aQueuePage);
         if (t) {
@@ -850,9 +925,7 @@ static void NowPlaying(float Wd, float H) {
     Paragraph(title, x, y, w, tf, pal::ink, 3);
     y += titleH + 8;
     if (t) {
-        wstring line = W(t->artist);
-        if (!t->album.empty()) line += (line.empty() ? L"" : L" \x00B7 ") + W(t->album);
-        Text(line, x, y, w, 24, UIF(17), pal::inkSoft);
+        ArtistText(W(t->artist), AlbumSuffix(*t), x, y, w, 24, UIF(17), pal::inkSoft, aArtistCurrent);
     }
     y += 24 + 24;
     Scrubber(x, y, w, g.pos, g.dur, pal::track, pal::accent, pal::ink, pal::muted, 6, t ? aSeekNow : aNone, 1);
@@ -1030,6 +1103,7 @@ static void PaintAll() {
     g_tickBoxes.clear();
     g_searchBox = {};
     g_listNearEnd = false;
+    for (auto& b : g_shelfBox) b = {};
     float Wd = g_W, H = g_H, mainH = H - kBar;
 
     if (g.nowPlaying && g.current()) {
@@ -1051,6 +1125,7 @@ static void PaintAll() {
             else { g.page = Page::Home; h = HomePage(x, y, w); }
             break;
         case Page::Mix: h = MixPage(x, y, w, FindShelf(g.pageId)); break;
+        case Page::Artist: h = ArtistPage(x, y, w); break;
         }
         g_contentH = 44 + h + 28;
         g_viewH = mainH;

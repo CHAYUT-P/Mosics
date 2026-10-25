@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import SwiftUI
 
@@ -21,14 +22,57 @@ struct VinylTheme: Identifiable, Hashable, Sendable {
     var sleeves: [SleevePalette]
 }
 
+/// Light, dark, or whatever macOS is set to.
+enum Appearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .system: "Match System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+}
+
 /// The current theme. Views read it through `Retro`, so changing it re-renders everything.
 @Observable
 final class ThemeStore {
     nonisolated(unsafe) static let shared = ThemeStore()
 
     var theme: VinylTheme = .swissRed
+    var appearance: Appearance = Appearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system {
+        didSet {
+            UserDefaults.standard.set(appearance.rawValue, forKey: "appearance")
+            MainActor.assumeIsolated { apply() }   // set from the UI, on the main thread
+        }
+    }
+    @ObservationIgnored private var observer: NSKeyValueObservation?
 
     private init() {}
+
+    /// Applies the setting and follows macOS when it changes between light and dark.
+    @MainActor func start() {
+        apply()
+        observer = NSApp.observe(\.effectiveAppearance) { _, _ in
+            DispatchQueue.main.async { ThemeStore.shared.followSystem() }
+        }
+    }
+
+    @MainActor private func apply() {
+        NSApp.appearance = switch appearance {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+        followSystem()
+    }
+
+    @MainActor private func followSystem() {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let next: VinylTheme = dark ? .swissRedDark : .swissRed
+        if next.id != theme.id { theme = next }
+    }
 }
 
 /// Shorthand for the current theme's colours.
@@ -158,4 +202,19 @@ extension VinylTheme {
             SleevePalette(0x121212, 0xFFFFFF, 0xD7261E, 0x6E6E6E, 0xFFFFFF), SleevePalette(0xD6D4CC, 0xD7261E, 0x121212, 0xFFFFFF, 0x121212),
             SleevePalette(0x9A9A92, 0x121212, 0xFFFFFF, 0xD7261E, 0x121212),
         ])
+
+    /// Swiss Red after dark: the same poster, printed on black. Paper and ink swap; the red stays.
+    static let swissRedDark = VinylTheme(
+        id: "swiss-dark", name: "Swiss Red Dark", isDark: true,
+        paper: c(0x161616), sidebar: c(0x1D1D1C), line: c(0x2F2F2D), card: c(0x1F1F1E), linen: c(0x2A2A28),
+        rowPlaying: c(0x3A1B18), rowHover: c(0x272726),
+        ink: c(0xF2F1EC), inkSoft: c(0xD6D4CC), muted: c(0x9A9A92),
+        accent: c(0xE0302A), accentText: c(0xFF5A4F), onAccent: .white, gold: c(0xF2F1EC), alt: c(0x6E6E6A), danger: c(0xFF6B61),
+        selectedBg: c(0xF2F1EC), selectedText: c(0x121212), shadow: c(0x000000), track: c(0x333331),
+        bar: c(0x0C0C0C), barText: c(0xFFFFFF), barMuted: c(0xA8A8A2), barTrack: c(0x3A3A3A), barHighlight: c(0xFF3B30),
+        barDanger: c(0xFF8A80), knobLight: c(0x4A4A4A), knobDark: c(0x1A1A1A),
+        vinyl: c(0x0A0A0A), groove: c(0x1F1F1F), grooveGap: c(0x2E2E2E), spindle: c(0x161616),
+        plinthTop: c(0x242423), plinthBottom: c(0x1A1A19), platter: c(0x2E2E2C), platterRim: c(0x3A3A38),
+        deckDetail: c(0x4A4A47), armBase: c(0x2A2A28), arm: c(0xD6D4CC), armDark: c(0xF2F1EC),
+        sleeves: VinylTheme.swissRed.sleeves)
 }

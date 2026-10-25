@@ -201,10 +201,12 @@ final class Suggestions {
         return shelves
     }
 
-    nonisolated static func mainArtist(_ t: Track) -> String {
+    nonisolated static func mainArtist(_ t: Track) -> String { mainArtist(t.artist) }
+
+    nonisolated static func mainArtist(_ credit: String) -> String {
         for sep in [" & ", ", ", " x ", " feat. "] {
-            if let r = t.artist.range(of: sep) { return String(t.artist[..<r.lowerBound]) }
+            if let r = credit.range(of: sep) { return String(credit[..<r.lowerBound]) }
         }
-        return t.artist
+        return credit
     }
 }

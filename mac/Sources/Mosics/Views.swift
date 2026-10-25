@@ -5,6 +5,14 @@ enum Page: Hashable {
     case home, search, recent, liked, queue, nowPlaying
     case playlist(UUID)
     case mix(String)
+    case artist(YTMusic.ArtistRef)
+}
+
+/// Opens the page of the first credited artist ("A & B feat. C" → A).
+@MainActor func openArtist(_ credit: String) {
+    let name = Suggestions.mainArtist(credit)
+    guard !name.isEmpty else { return }
+    WindowState.shared.page = .artist(YTMusic.ArtistRef(name: name))
 }
 
 struct ContentView: View {
@@ -50,7 +58,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .foregroundStyle(Retro.ink)
         .tint(Retro.accent)
-        .preferredColorScheme(.light)
+        .preferredColorScheme(ThemeStore.shared.theme.isDark ? .dark : .light)
         .sheet(isPresented: Binding(get: { editingCover != nil }, set: { if !$0 { editingCover = nil } })) {
             if let id = editingCover { CoverPicker(playlistID: id) }
         }
@@ -84,6 +92,7 @@ struct ContentView: View {
                 ContentUnavailableView("Playlist not found", systemImage: "opticaldisc")
             }
         case .mix(let id): MixPage(id: id, page: $window.page)
+        case .artist(let ref): ArtistView(ref: ref)
         }
     }
 }
@@ -101,6 +110,8 @@ private struct Sidebar: View {
             HStack(spacing: 10) {
                 VinylDisc(size: 34, labelColors: (Retro.gold, Retro.accent), labelRatio: 0.3)
                 Text("mosics").font(.display(25, .bold))
+                Spacer()
+                AppearanceMenu()
             }
             .padding(.horizontal, 8)
             .padding(.top, 46)
@@ -420,6 +431,7 @@ struct LPTrackList<Header: View>: View {
     var kind: Kind = .plain
     var identity = "list"
     var onReachEnd: (() -> Void)? = nil
+    var emptyMessage = "Nothing on this record yet — right-click any song to add it."
     @ViewBuilder var header: Header
 
     var body: some View {
@@ -427,7 +439,7 @@ struct LPTrackList<Header: View>: View {
             LazyVStack(alignment: .leading, spacing: 22) {
                 header
                 if tracks.isEmpty {
-                    Text("Nothing on this record yet — right-click any song to add it.")
+                    Text(emptyMessage)
                         .font(.displayItalic(15)).foregroundStyle(Retro.muted)
                         .padding(.vertical, 30)
                 } else {
@@ -494,7 +506,7 @@ struct TrackRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(track.title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
                     .foregroundStyle(isCurrent ? Retro.accentText : Retro.ink)
-                Text(track.artist).font(.system(size: 12.5)).foregroundStyle(Retro.muted).lineLimit(1)
+                ArtistLink(credit: track.artist, font: .system(size: 12.5), color: Retro.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(track.album).font(.system(size: 12.5).italic()).foregroundStyle(Retro.muted).lineLimit(1)
@@ -531,6 +543,7 @@ struct TrackMenu: View {
             Button("Play Next") { picked.reversed().forEach(player.playNext) }
             Button("Add to Queue") { picked.forEach(player.addToQueue) }
             Button("Start Radio") { player.startRadio(first) }
+            Button("Go to Artist") { openArtist(first.artist) }
             Divider()
             Button(library.isLiked(first) ? "Remove from Liked Songs" : "Save to Liked Songs") {
                 let like = !library.isLiked(first)
@@ -671,7 +684,7 @@ struct QueuePage: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("NOW SPINNING").font(.system(size: 11, weight: .bold)).tracking(1.2).foregroundStyle(Retro.accentText)
                             Text(now.title).font(.display(20)).lineLimit(1)
-                            Text(now.artist).font(.system(size: 13)).foregroundStyle(Retro.muted)
+                            ArtistLink(credit: now.artist, font: .system(size: 13), color: Retro.muted)
                         }
                     }
                 }
@@ -703,8 +716,11 @@ struct PlayerBar: View {
                         if let err = player.error {
                             Text(err).font(.system(size: 12)).foregroundStyle(Retro.barDanger).lineLimit(2).help(err)
                         } else {
-                            Text(player.current?.artist ?? "Pick a record to play")
-                                .font(.system(size: 12.5)).foregroundStyle(Retro.barMuted).lineLimit(1)
+                            if let artist = player.current?.artist {
+                                ArtistLink(credit: artist, font: .system(size: 12.5), color: Retro.barMuted)
+                            } else {
+                                Text("Pick a record to play").font(.system(size: 12.5)).foregroundStyle(Retro.barMuted)
+                            }
                         }
                     }
                 }
@@ -758,9 +774,7 @@ struct PlayerBar: View {
                 }
                 Button { page = .queue } label: { Image(systemName: "list.bullet").foregroundStyle(Retro.barMuted) }
                     .buttonStyle(.plain).help("Queue")
-                VolumeKnob(volume: $p.volume)
-                Text("\(Int((player.volume * 100).rounded()))").font(.system(size: 12)).monospacedDigit()
-                    .foregroundStyle(Retro.barMuted).frame(width: 24, alignment: .leading)
+                VolumeSlider(volume: $p.volume)
             }
             .frame(width: 220, alignment: .trailing)
         }
@@ -812,34 +826,85 @@ struct Scrubber: View {
     }
 }
 
-/// Retro volume knob: drag up/down (or scroll) to turn it.
-struct VolumeKnob: View {
+/// Volume: a speaker (click to mute) and a slider you can click, drag or scroll.
+struct VolumeSlider: View {
     @Binding var volume: Float
-    @State private var start: Float?
+    @State private var hover = false
+    @State private var dragging = false
+    @State private var beforeMute: Float = 0.8
+
+    private var icon: String {
+        volume <= 0.001 ? "speaker.slash.fill" : volume < 0.34 ? "speaker.wave.1.fill" : volume < 0.67 ? "speaker.wave.2.fill" : "speaker.wave.3.fill"
+    }
 
     var body: some View {
-        ZStack {
-            Circle().fill(RadialGradient(colors: [Retro.knobLight, Retro.knobDark], center: UnitPoint(x: 0.35, y: 0.3),
-                                         startRadius: 1, endRadius: 22))
-                .overlay(Circle().strokeBorder(Retro.barTrack, lineWidth: 2))
-            Capsule().fill(Retro.barHighlight).frame(width: 3, height: 9).offset(y: -9)
-                .rotationEffect(.degrees(-135 + 270 * Double(volume)))
-        }
-        .frame(width: 34, height: 34)
-        .contentShape(Circle())
-        .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { v in
-                if start == nil { start = volume }
-                volume = min(1, max(0, start! + Float(-v.translation.height + v.translation.width) / 160))
+        HStack(spacing: 8) {
+            Button {
+                if volume > 0.001 { beforeMute = volume; volume = 0 } else { volume = max(beforeMute, 0.1) }
+            } label: {
+                Image(systemName: icon).font(.system(size: 13)).frame(width: 20, alignment: .leading)
+                    .foregroundStyle(hover ? Retro.barText : Retro.barMuted)
             }
-            .onEnded { _ in start = nil })
-        .help("Volume — drag to turn")
+            .buttonStyle(.plain)
+            .help(volume > 0.001 ? "Mute" : "Unmute")
+            GeometryReader { geo in
+                let frac = CGFloat(min(1, max(0, volume)))
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Retro.barTrack).frame(height: 4)
+                    Capsule().fill(hover || dragging ? Retro.barHighlight : Retro.barText).frame(width: geo.size.width * frac, height: 4)
+                    Circle().fill(Retro.barText).frame(width: 12, height: 12)
+                        .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+                        .offset(x: geo.size.width * frac - 6)
+                        .opacity(hover || dragging ? 1 : 0)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0)
+                    .onChanged { v in dragging = true; volume = Float(min(1, max(0, v.location.x / geo.size.width))) }
+                    .onEnded { _ in dragging = false })
+            }
+            .frame(width: 96, height: 16)
+        }
+        .onHover { hover = $0 }
         .accessibilityElement()
         .accessibilityLabel("Volume")
         .accessibilityValue("\(Int(volume * 100)) percent")
         .accessibilityAdjustableAction { dir in
             volume = min(1, max(0, volume + (dir == .increment ? 0.05 : -0.05)))
         }
+    }
+}
+
+/// An artist name you can click to open their page; underlined on hover.
+struct ArtistLink: View {
+    let credit: String
+    var font: Font
+    var color: Color
+    @State private var hover = false
+
+    var body: some View {
+        Text(credit).font(font).foregroundStyle(color).lineLimit(1).underline(hover)
+            .onHover { hover = $0 }
+            .onTapGesture { openArtist(credit) }
+            .help("Go to \(Suggestions.mainArtist(credit))")
+    }
+}
+
+/// Sun / moon button: Match System, Light or Dark.
+struct AppearanceMenu: View {
+    var body: some View {
+        @Bindable var store = ThemeStore.shared
+        Menu {
+            Picker("Appearance", selection: $store.appearance) {
+                ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: store.theme.isDark ? "moon.fill" : "sun.max.fill")
+                .font(.system(size: 13)).foregroundStyle(Retro.muted).frame(width: 28, height: 28)
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help("Appearance")
     }
 }
 
@@ -880,8 +945,14 @@ struct NowPlayingPage: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("NOW SPINNING").font(.system(size: 11.5, weight: .bold)).tracking(1.2).foregroundStyle(Retro.accentText)
                 Text(player.current?.title ?? "Nothing playing").font(.display(46)).lineLimit(3).minimumScaleFactor(0.6)
-                Text(player.current.map { [$0.artist, $0.album].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "")
-                    .font(.system(size: 17)).foregroundStyle(Retro.inkSoft)
+                if let t = player.current {
+                    HStack(spacing: 0) {
+                        ArtistLink(credit: t.artist, font: .system(size: 17), color: Retro.inkSoft).fixedSize()
+                        if !t.album.isEmpty {
+                            Text(" · " + t.album).font(.system(size: 17)).foregroundStyle(Retro.inkSoft).lineLimit(1)
+                        }
+                    }
+                }
             }
             Scrubber(time: player.time, duration: player.duration, track: Retro.track, fill: Retro.accent,
                      knob: Retro.ink, label: Retro.muted, height: 6, seek: player.seek)
@@ -918,7 +989,7 @@ struct NowPlayingPage: View {
                             Text("\(i + 1)").font(.display(13, .bold)).foregroundStyle(Retro.muted).frame(width: 18, alignment: .leading)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(t.title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                                Text(t.artist).font(.system(size: 12)).foregroundStyle(Retro.muted).lineLimit(1)
+                                ArtistLink(credit: t.artist, font: .system(size: 12), color: Retro.muted)
                             }
                             Spacer()
                             Text(t.duration).font(.system(size: 12)).monospacedDigit().foregroundStyle(Retro.muted)
