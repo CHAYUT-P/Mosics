@@ -109,8 +109,8 @@ private struct Sidebar: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 10) {
                 VinylDisc(size: 34, labelColors: (Retro.gold, Retro.accent), labelRatio: 0.3)
-                Text("mosics").font(.display(25, .bold))
-                Spacer()
+                Text("mosics").font(.display(25, .bold)).lineLimit(1).fixedSize()
+                Spacer(minLength: 0)
                 AppearanceMenu()
             }
             .padding(.horizontal, 8)
@@ -901,7 +901,7 @@ struct AppearanceMenu: View {
             .pickerStyle(.inline)
         } label: {
             Image(systemName: store.theme.isDark ? "moon.fill" : "sun.max.fill")
-                .font(.system(size: 13)).foregroundStyle(Retro.muted).frame(width: 28, height: 28)
+                .font(.system(size: 13)).foregroundStyle(Retro.muted).frame(width: 24, height: 28)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .help("Appearance")

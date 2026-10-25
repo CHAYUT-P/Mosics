@@ -241,7 +241,8 @@ static void ApplyTheme(bool force = false) {
     g_shapes.clear();   // shadows and grooves are coloured by the theme
     if (g_brCard) DeleteObject(g_brCard);
     if (g_brPaper) DeleteObject(g_brPaper);
-    ApplyTheme(true);   // also creates the brushes
+    g_brCard = CreateSolidBrush(CR(pal::card));
+    g_brPaper = CreateSolidBrush(CR(pal::paper));
     if (HMODULE ux = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)) {
         auto setMode = (int(WINAPI*)(int))(void*)GetProcAddress(ux, MAKEINTRESOURCEA(135));   // SetPreferredAppMode
         auto flush = (void(WINAPI*)())(void*)GetProcAddress(ux, MAKEINTRESOURCEA(136));       // FlushMenuThemes
@@ -1177,8 +1178,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int show) {
 
     InitMediaFoundation();
 
-    g_brCard = CreateSolidBrush(CR(pal::card));
-    g_brPaper = CreateSolidBrush(CR(pal::paper));
+    ApplyTheme(true);   // sets the colours and creates the brushes
     g_iconSmall = (HICON)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
                                     GetSystemMetrics(SM_CYSMICON), 0);
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
