@@ -13,6 +13,8 @@ Mosics for Mac and Mosics for Windows are the **same app at the same version** (
 
 - Search songs, or switch to **Videos** for live versions, covers and uploads. More results load as you scroll.
 - **Home:** "Now spinning", mixes made for you (Thai Indie, City Pop, Japan Indie & Anime, If You Like Oasis, plus mixes from what you play) and your recent records.
+- **Artist pages:** click any artist name (or right-click a song → **Go to Artist**) for their photo, up to 100 songs (most played first), artist radio and "Fans might also like".
+- **Light or dark:** the sun/moon button at the top of the sidebar picks Match System, Light or Dark (on a Mac also in **View → Appearance**).
 - **Playlists** with your own covers: pick a sleeve design, use the songs' artwork, or choose any picture.
 - Liked Songs, Recently Played, a queue, shuffle, repeat, and **autoplay** of similar songs when the queue ends.
 - **Background mode:** close the window and the music keeps playing. Control it from the record icon in the menu bar (Mac) or the system tray (Windows).
